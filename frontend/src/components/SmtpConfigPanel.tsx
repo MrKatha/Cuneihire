@@ -25,12 +25,17 @@ const PROVIDERS = [
 
 const SANITIZE_REGEX = /[^a-zA-Z0-9!@#$%^&*()_+\-=[\]{};':"\\|,.<>/? ]/g;
 
+// No more per-account daily limit (2026-08-25, operator ask — "Google by default provides a limit of 50
+// mails per day so there should not be a daily limit option"). Every account gets this fixed default;
+// the actual send cap is now a single account-wide setting controlled by "Activate Automation" in
+// Settings, enforced backend-side in automail.worker.js.
+const DEFAULT_DAILY_LIMIT = 50;
+
 export function SmtpConfigPanel({ accounts, onSaveAccount, onDeleteAccount, onResetAll, onClose }: Props) {
   const [mounted, setMounted] = useState(false);
   const [view, setView] = useState<"list" | "form">(accounts.length === 0 ? "form" : "list");
   const [editingId, setEditingId] = useState<string | undefined>(undefined);
 
-  const [label, setLabel] = useState("");
   const [email, setEmail] = useState("");
   const [fromEmail, setFromEmail] = useState("");
   const [fromName, setFromName] = useState("");
@@ -38,7 +43,6 @@ export function SmtpConfigPanel({ accounts, onSaveAccount, onDeleteAccount, onRe
   const [provider, setProvider] = useState("gmail");
   const [host, setHost] = useState("smtp.gmail.com");
   const [port, setPort] = useState(465);
-  const [dailyLimit, setDailyLimit] = useState(50);
   const [imapEnabled, setImapEnabled] = useState(false);
   const [imapHost, setImapHost] = useState("");
   const [imapPort, setImapPort] = useState(993);
@@ -64,7 +68,6 @@ export function SmtpConfigPanel({ accounts, onSaveAccount, onDeleteAccount, onRe
 
   function resetForm() {
     setEditingId(undefined);
-    setLabel("");
     setEmail("");
     setFromEmail("");
     setFromName("");
@@ -72,7 +75,6 @@ export function SmtpConfigPanel({ accounts, onSaveAccount, onDeleteAccount, onRe
     setProvider("gmail");
     setHost("smtp.gmail.com");
     setPort(465);
-    setDailyLimit(50);
     setImapEnabled(false);
     setImapHost("");
     setImapPort(993);
@@ -87,7 +89,6 @@ export function SmtpConfigPanel({ accounts, onSaveAccount, onDeleteAccount, onRe
 
   function openEditForm(a: SmtpAccount) {
     setEditingId(a.id);
-    setLabel(a.label);
     setEmail(a.email);
     setFromEmail(a.fromEmail);
     setFromName(a.fromName);
@@ -95,7 +96,6 @@ export function SmtpConfigPanel({ accounts, onSaveAccount, onDeleteAccount, onRe
     setProvider(a.provider);
     setHost(a.host);
     setPort(a.port);
-    setDailyLimit(a.dailyLimit);
     setImapEnabled(a.imapEnabled);
     setImapHost(a.imapHost || "");
     setImapPort(a.imapPort || 993);
@@ -138,7 +138,8 @@ export function SmtpConfigPanel({ accounts, onSaveAccount, onDeleteAccount, onRe
 
       const saved = await onSaveAccount({
         id: editingId,
-        label: label.trim() || email.trim(),
+        // No user-facing label any more — the mailbox's own address IS the account's name everywhere.
+        label: email.trim(),
         provider,
         email: email.trim(),
         appPassword: data.encryptedPassword,
@@ -146,7 +147,7 @@ export function SmtpConfigPanel({ accounts, onSaveAccount, onDeleteAccount, onRe
         port,
         fromEmail: fromEmail.trim(),
         fromName: fromName.trim(),
-        dailyLimit,
+        dailyLimit: DEFAULT_DAILY_LIMIT,
         isVerified: true,
         isActive: true,
         imapEnabled: canMonitorReplies && imapEnabled,
@@ -170,7 +171,7 @@ export function SmtpConfigPanel({ accounts, onSaveAccount, onDeleteAccount, onRe
   }
 
   async function handleDelete(a: SmtpAccount) {
-    if (!window.confirm(`Remove "${a.label || a.email}"? Sending will stop using this mailbox.`)) return;
+    if (!window.confirm(`Remove "${a.email}"? Sending will stop using this mailbox.`)) return;
     await onDeleteAccount(a.id);
     toast.success("Account removed.");
   }
@@ -202,7 +203,7 @@ export function SmtpConfigPanel({ accounts, onSaveAccount, onDeleteAccount, onRe
           <div>
             <h2 id="smtp-modal-title">SMTP accounts</h2>
             <p className="hint compact">
-              Add one or more mailboxes — sends spread across them, each capped at its own daily limit.
+              Add one or more mailboxes — sends spread across them automatically.
             </p>
           </div>
           <button type="button" className="btn ghost" onClick={onClose}>
@@ -220,9 +221,8 @@ export function SmtpConfigPanel({ accounts, onSaveAccount, onDeleteAccount, onRe
                   {accounts.map((a) => (
                     <li key={a.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "0.75rem" }}>
                       <div>
-                        <div style={{ fontWeight: 500 }}>{a.label || a.email}</div>
+                        <div style={{ fontWeight: 500 }}>{a.email}</div>
                         <div className="hint compact">
-                          {a.email} · {a.dailyLimit}/day ·{" "}
                           <span className={a.isVerified ? "msg ok" : "msg err"}>
                             {a.isVerified ? "Verified" : "Not verified"}
                           </span>
@@ -255,16 +255,6 @@ export function SmtpConfigPanel({ accounts, onSaveAccount, onDeleteAccount, onRe
           {view === "form" && (
             <>
               <div className="grid-2">
-                <label className="field" style={{ gridColumn: "1 / -1" }}>
-                  <span>Label (optional)</span>
-                  <input
-                    type="text"
-                    value={label}
-                    onChange={(e) => setLabel(e.target.value)}
-                    placeholder="e.g. Primary Gmail"
-                  />
-                </label>
-
                 <label className="field" style={{ gridColumn: "1 / -1" }}>
                   <span>Provider</span>
                   <select value={provider} onChange={handleProviderChange}>
@@ -374,23 +364,6 @@ export function SmtpConfigPanel({ accounts, onSaveAccount, onDeleteAccount, onRe
                       {showPassword ? "Hide" : "Show"}
                     </button>
                   </div>
-                </label>
-
-                <label className="field">
-                  <span>
-                    Daily limit
-                    <HelpTooltip
-                      title="Daily limit"
-                      content={<p>The maximum number of emails this account will send per day. Keep it around 50 to avoid the provider flagging it as spam.</p>}
-                    />
-                  </span>
-                  <input
-                    type="number"
-                    min={1}
-                    max={500}
-                    value={dailyLimit}
-                    onChange={(e) => setDailyLimit(Number(e.target.value) || 50)}
-                  />
                 </label>
 
                 {canMonitorReplies ? (

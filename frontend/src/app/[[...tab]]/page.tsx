@@ -25,7 +25,6 @@ import { JamsTab } from "@/components/JamsTab";
 import { ProfileTab } from "@/components/ProfileTab";
 import { JobsRolesTab } from "@/components/JobsRolesTab";
 import { AutoFetchModal } from "@/components/AutoFetchModal";
-import { AutomailModal } from "@/components/AutomailModal";
 import { AITab } from "@/components/AITab";
 import { JobBoardTab } from "@/components/JobBoardTab";
 import { RecruiterTab } from "@/components/RecruiterTab";
@@ -178,7 +177,6 @@ export default function Home() {
   const [recruiterProfile, setRecruiterProfile] = useState<RecruiterProfile | null>(null);
 
   const [showAutoFetch, setShowAutoFetch] = useState(false);
-  const [showAutomailModal, setShowAutomailModal] = useState(false);
   const [showSmtpModal, setShowSmtpModal] = useState(false);
 
   const [showPasswordChange, setShowPasswordChange] = useState(false);
@@ -1104,18 +1102,48 @@ export default function Home() {
                 </div>
               </div>
 
-              <div className="smtp-bar" style={{ marginTop: '0.5rem' }}>
+              {/* Activate Automation (2026-08-25, operator ask — this used to be an "Expand" -> full
+                  modal, same as the rows above; not any more. This is the whole thing: a toggle, plus
+                  the one setting worth keeping, daily limit. No template requirement to turn it on — AI
+                  write mode needs no template at all. Changes save immediately via the existing
+                  `automail` debounced-autosave effect above, same as every other app_state field — no
+                  separate Save button. The actual cap is enforced backend-side in automail.worker.js. */}
+              <div className="smtp-bar" style={{ marginTop: '0.5rem', flexWrap: 'wrap', gap: '0.75rem' }}>
                 <div className="smtp-bar-left">
-                  <span className="smtp-bar-title">Automail Settings</span>
+                  <span className="smtp-bar-title">Activate Automation</span>
                   <span className={automail.enabled ? "badge ok" : "badge warn"}>
-                    {automail.enabled ? "Active" : "Disabled"}
+                    {automail.enabled ? "Active" : "Inactive"}
                   </span>
                 </div>
-                <div className="smtp-bar-actions">
-                  <button type="button" className="btn primary" onClick={() => setShowAutomailModal(true)}>
-                    Expand
-                  </button>
+                <div className="smtp-bar-actions" style={{ display: 'flex', alignItems: 'center', gap: '1rem', flexWrap: 'wrap' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.85rem', color: 'var(--muted)' }}>
+                    Daily limit
+                    <input
+                      type="number"
+                      min={1}
+                      max={500}
+                      value={automail.dailyLimit}
+                      onChange={(e) => setAutomail({ ...automail, dailyLimit: Number(e.target.value) || 1 })}
+                      style={{ width: '70px' }}
+                    />
+                    <span>(sent today: {sentTodayCount})</span>
+                  </label>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <input
+                      type="checkbox"
+                      checked={automail.enabled}
+                      disabled={!smtpAccounts.some(a => a.isVerified && a.isActive)}
+                      onChange={(e) => setAutomail({ ...automail, enabled: e.target.checked })}
+                      style={{ width: '1.2rem', height: '1.2rem' }}
+                    />
+                    <span style={{ fontSize: '0.85rem', color: automail.enabled ? 'var(--ok)' : 'var(--muted)' }}>
+                      {automail.enabled ? 'Active' : 'Inactive'}
+                    </span>
+                  </label>
                 </div>
+                {!smtpAccounts.some(a => a.isVerified && a.isActive) && (
+                  <p className="hint compact" style={{ width: '100%', margin: 0 }}>Add and verify an SMTP account above before activating.</p>
+                )}
               </div>
 
               <div className="smtp-bar" style={{ marginTop: '0.5rem', display: 'block' }}>
@@ -1163,17 +1191,6 @@ export default function Home() {
               onSave={setAutoFetch}
               roleDefs={roleDefs}
               onClose={() => setShowAutoFetch(false)}
-            />
-          )}
-
-          {showAutomailModal && (
-            <AutomailModal
-              config={automail}
-              smtpAccounts={smtpAccounts}
-              templates={templates}
-              sentTodayCount={sentTodayCount}
-              onSave={setAutomail}
-              onClose={() => setShowAutomailModal(false)}
             />
           )}
 

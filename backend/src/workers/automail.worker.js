@@ -80,7 +80,16 @@ async function runAutomailJobs(supabase) {
         continue;
       }
 
-      const totalRemaining = pool.reduce((sum, a) => sum + Math.max(0, a.remaining), 0);
+      const poolRemaining = pool.reduce((sum, a) => sum + Math.max(0, a.remaining), 0);
+
+      // Account-wide daily cap (2026-08-25, operator ask — "Activate Automation"'s daily limit is now
+      // THE governing number, not each SMTP account's own 50/day default summed together). Each pooled
+      // account already carries its own sent-today count via `remaining` (see smtpPool.js), so total sent
+      // today across the whole pool is just the inverse of that — no extra query needed.
+      const totalSentToday = pool.reduce((sum, a) => sum + Math.max(0, (a.dailyLimit || 50) - a.remaining), 0);
+      const globalLimit = user.daily_mail_limit || 50;
+      const globalRemaining = Math.max(0, globalLimit - totalSentToday);
+      const totalRemaining = Math.min(poolRemaining, globalRemaining);
       if (totalRemaining <= 0) {
         // Silently skip to prevent log flooding every few seconds
         continue;
