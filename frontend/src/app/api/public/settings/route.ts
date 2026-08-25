@@ -9,7 +9,7 @@ export async function GET() {
   try {
     const { data, error } = await supabase
       .from("automailsend_global_settings")
-      .select("allow_signups")
+      .select("allow_signups, max_daily_send_limit")
       .eq("id", 1)
       .single();
 
@@ -17,10 +17,13 @@ export async function GET() {
       return NextResponse.json({ success: false, error: error.message }, { status: 500 });
     }
 
-    // Default to true if no row is found
+    // Defaults if no row is found
     const allow_signups = data ? data.allow_signups : true;
-    
-    return NextResponse.json({ success: true, data: { allow_signups } });
+    // Dashboard's daily-limit ceiling (2026-08-25) — public/candidate-facing, so no admin auth needed to
+    // read it, same as allow_signups above.
+    const max_daily_send_limit = data ? data.max_daily_send_limit : 100;
+
+    return NextResponse.json({ success: true, data: { allow_signups, max_daily_send_limit } });
   } catch (error: any) {
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }

@@ -22,6 +22,7 @@ const DEFAULT_GLOBAL_SETTINGS = {
   min_pagination_delay: 5,
   max_pagination_limit: 10,
   allow_signups: true,
+  max_daily_send_limit: 100,
 };
 
 export async function GET(req: Request) {

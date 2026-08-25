@@ -6,9 +6,7 @@ import toast from "react-hot-toast";
 import { supabase } from "@/lib/supabase";
 import {
   roleLabel,
-  type AiConfig,
   type AutomailConfig,
-  type CandidateProfile,
   type Recipient,
   type ReplyRecord,
   type Role,
@@ -21,7 +19,6 @@ import {
 import { matchScoreTone, firstUrl } from "@/lib/jobPosts";
 import { StatusPill } from "./JobPostCard";
 import { ExecutionLogsPanel } from "./ExecutionLogsPanel";
-import { QuickSendModal } from "./QuickSendModal";
 
 type Props = {
   userId: string | null;
@@ -30,9 +27,7 @@ type Props = {
   templates: Record<Role, RoleTemplate[]>;
   config: SmtpConfig;
   automail: AutomailConfig;
-  ai: AiConfig;
   smtpAccounts: SmtpAccount[];
-  profile: CandidateProfile;
   sentLog: SentRecord[];
   onSentLogChange: (sentLog: SentRecord[]) => void;
   replies: ReplyRecord[];
@@ -81,9 +76,7 @@ export function JamsTab({
   templates,
   config,
   automail,
-  ai,
   smtpAccounts,
-  profile,
   sentLog,
   onSentLogChange,
   replies,
@@ -122,8 +115,6 @@ export function JamsTab({
       return next;
     });
   }
-
-  const [showQuickSend, setShowQuickSend] = useState(false);
 
   // Sending (ported from the old SendPanel/QuickSendTab — same backend batch mechanism)
   const [progress, setProgress] = useState({ current: 0, total: 0 });
@@ -401,9 +392,6 @@ export function JamsTab({
         )}
 
         <div style={{ display: "flex", gap: "0.5rem", marginBottom: "1rem", flexWrap: "wrap", alignItems: "flex-start" }}>
-          <button type="button" className="btn primary" onClick={() => setShowQuickSend(true)}>
-            + Quick Send
-          </button>
           <button type="button" className="btn ghost" onClick={toggleActivity} style={{ fontSize: "0.8rem" }}>
             {activityOpen ? "▾" : "▸"} Automation Activity
           </button>
@@ -721,19 +709,6 @@ export function JamsTab({
         document.body
       )}
 
-      {showQuickSend && userId && (
-        <QuickSendModal
-          userId={userId}
-          roleDefs={roleDefs}
-          templates={templates}
-          automail={automail}
-          ai={ai}
-          smtpAccounts={smtpAccounts}
-          profile={profile}
-          sentTodayCount={sentTodayCount}
-          onClose={() => setShowQuickSend(false)}
-        />
-      )}
     </section>
   );
 }

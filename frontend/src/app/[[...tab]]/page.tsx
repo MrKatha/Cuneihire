@@ -22,6 +22,8 @@ import { EmailConfigTab } from "@/components/EmailConfigTab";
 import { ResumeBuilder } from "@/components/ResumeBuilder";
 import { SmtpConfigPanel } from "@/components/SmtpConfigPanel";
 import { JamsTab } from "@/components/JamsTab";
+import { DashboardTab } from "@/components/DashboardTab";
+import { QuickSendModal } from "@/components/QuickSendModal";
 import { ProfileTab } from "@/components/ProfileTab";
 import { JobsRolesTab } from "@/components/JobsRolesTab";
 import { AutoFetchModal } from "@/components/AutoFetchModal";
@@ -82,13 +84,13 @@ import {
 // selection) are two separate tabs again (2026-08-19, operator follow-up) — briefly merged into one
 // section with an internal sub-tab toggle, reverted for easier navigation: real sidebar entries beat a
 // toggle buried inside one page. See docs/architecture.md.
-const TAB_NAMES = ["emails", "profile", "roles", "board", "templates", "resumes", "ai", "settings", "recruiter", "admin"] as const;
+const TAB_NAMES = ["dashboard", "emails", "profile", "roles", "board", "templates", "resumes", "ai", "settings", "recruiter", "admin"] as const;
 type TabName = typeof TAB_NAMES[number];
 
 export default function Home() {
   const router = useRouter();
 
-  const [activeTab, setActiveTab] = useState<TabName>("emails");
+  const [activeTab, setActiveTab] = useState<TabName>("dashboard");
   // Resumes tab's own Builder/Library sub-tab now lives inside ResumeBuilder itself, alongside the
   // From-your-profile/Start-from-scratch mode (2026-08-24, UI pass) — see that component's resumeSubTab
   // state comment.
@@ -117,7 +119,7 @@ export default function Home() {
 
   useEffect(() => {
     if (typeof window !== "undefined") {
-      const currentTab = window.location.pathname.replace('/', '') || 'emails';
+      const currentTab = window.location.pathname.replace('/', '') || 'dashboard';
       if (TAB_NAMES.includes(currentTab as TabName)) {
         setActiveTab(currentTab as TabName);
       }
@@ -169,6 +171,17 @@ export default function Home() {
   const [automail, setAutomail] = useState(defaultState().automail);
   const [ai, setAi] = useState<AiConfig>(defaultState().ai);
   const [aiCredits, setAiCredits] = useState(defaultState().aiCredits);
+  // Dashboard's daily-limit ceiling (2026-08-25) — admin-configurable, one global number for now (no
+  // billing/plan system yet). Public route, no auth needed, same as allow_signups on the signup page.
+  const [globalMaxDailyLimit, setGlobalMaxDailyLimit] = useState(100);
+  useEffect(() => {
+    fetch("/api/public/settings")
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.success && data.data.max_daily_send_limit) setGlobalMaxDailyLimit(data.data.max_daily_send_limit);
+      })
+      .catch(() => {});
+  }, []);
   const [profile, setProfile] = useState<CandidateProfile>(defaultState().profile);
   const [roleDefs, setRoleDefs] = useState<RoleDef[]>([]);
   const [smtpAccounts, setSmtpAccounts] = useState<SmtpAccount[]>([]);
@@ -178,6 +191,8 @@ export default function Home() {
 
   const [showAutoFetch, setShowAutoFetch] = useState(false);
   const [showSmtpModal, setShowSmtpModal] = useState(false);
+  // Lifted from JamsTab (2026-08-25, operator ask — Quick Send moved to the new Dashboard tab).
+  const [showQuickSend, setShowQuickSend] = useState(false);
 
   const [showPasswordChange, setShowPasswordChange] = useState(false);
   const [newPassword, setNewPassword] = useState("");
@@ -817,6 +832,12 @@ export default function Home() {
         </div>
         <nav className="sidebar-nav">
           <button
+            className={`sidebar-tab ${activeTab === 'dashboard' ? 'active' : ''}`}
+            onClick={() => handleTabChange('dashboard')}
+          >
+            Dashboard
+          </button>
+          <button
             className={`sidebar-tab ${activeTab === 'emails' ? 'active' : ''}`}
             onClick={() => handleTabChange('emails')}
           >
@@ -946,6 +967,23 @@ export default function Home() {
             />
           )}
 
+          {activeTab === 'dashboard' && (
+            <DashboardTab
+              profile={profile}
+              automail={automail}
+              onAutomailChange={setAutomail}
+              smtpAccounts={smtpAccounts}
+              autoFetch={autoFetch}
+              sentTodayCount={sentTodayCount}
+              globalMaxDailyLimit={globalMaxDailyLimit}
+              aiCredits={aiCredits}
+              sentLog={sentLog}
+              onOpenSmtp={() => setShowSmtpModal(true)}
+              onOpenAutoFetch={() => setShowAutoFetch(true)}
+              onOpenQuickSend={() => setShowQuickSend(true)}
+            />
+          )}
+
           {activeTab === 'emails' && (
             <JamsTab
               userId={userId}
@@ -954,9 +992,7 @@ export default function Home() {
               templates={templates}
               config={config}
               automail={automail}
-              ai={ai}
               smtpAccounts={smtpAccounts}
-              profile={profile}
               sentLog={sentLog}
               onSentLogChange={setSentLog}
               replies={replies}
@@ -1066,7 +1102,7 @@ export default function Home() {
               <div style={{ fontSize: "3rem", marginBottom: "1rem" }}>🔒</div>
               <h2 className="panel-title" style={{ color: "var(--err)" }}>Access Denied</h2>
               <p className="hint">You do not have administrative privileges to view this portal.</p>
-              <button className="btn primary" onClick={() => handleTabChange('emails')} style={{ margin: "1rem auto 0" }}>
+              <button className="btn primary" onClick={() => handleTabChange('dashboard')} style={{ margin: "1rem auto 0" }}>
                 Return to Dashboard
               </button>
             </div>
@@ -1102,49 +1138,9 @@ export default function Home() {
                 </div>
               </div>
 
-              {/* Activate Automation (2026-08-25, operator ask — this used to be an "Expand" -> full
-                  modal, same as the rows above; not any more. This is the whole thing: a toggle, plus
-                  the one setting worth keeping, daily limit. No template requirement to turn it on — AI
-                  write mode needs no template at all. Changes save immediately via the existing
-                  `automail` debounced-autosave effect above, same as every other app_state field — no
-                  separate Save button. The actual cap is enforced backend-side in automail.worker.js. */}
-              <div className="smtp-bar" style={{ marginTop: '0.5rem', flexWrap: 'wrap', gap: '0.75rem' }}>
-                <div className="smtp-bar-left">
-                  <span className="smtp-bar-title">Activate Automation</span>
-                  <span className={automail.enabled ? "badge ok" : "badge warn"}>
-                    {automail.enabled ? "Active" : "Inactive"}
-                  </span>
-                </div>
-                <div className="smtp-bar-actions" style={{ display: 'flex', alignItems: 'center', gap: '1rem', flexWrap: 'wrap' }}>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.85rem', color: 'var(--muted)' }}>
-                    Daily limit
-                    <input
-                      type="number"
-                      min={1}
-                      max={500}
-                      value={automail.dailyLimit}
-                      onChange={(e) => setAutomail({ ...automail, dailyLimit: Number(e.target.value) || 1 })}
-                      style={{ width: '70px' }}
-                    />
-                    <span>(sent today: {sentTodayCount})</span>
-                  </label>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                    <input
-                      type="checkbox"
-                      checked={automail.enabled}
-                      disabled={!smtpAccounts.some(a => a.isVerified && a.isActive)}
-                      onChange={(e) => setAutomail({ ...automail, enabled: e.target.checked })}
-                      style={{ width: '1.2rem', height: '1.2rem' }}
-                    />
-                    <span style={{ fontSize: '0.85rem', color: automail.enabled ? 'var(--ok)' : 'var(--muted)' }}>
-                      {automail.enabled ? 'Active' : 'Inactive'}
-                    </span>
-                  </label>
-                </div>
-                {!smtpAccounts.some(a => a.isVerified && a.isActive) && (
-                  <p className="hint compact" style={{ width: '100%', margin: 0 }}>Add and verify an SMTP account above before activating.</p>
-                )}
-              </div>
+              {/* "Activate Automation" moved to the new Dashboard tab (2026-08-25, operator ask — "the
+                  toggle for the automation should obviously be in our dashboard"). It briefly lived here
+                  as an inline row (see docs/memory.md) before that; Settings no longer duplicates it. */}
 
               <div className="smtp-bar" style={{ marginTop: '0.5rem', display: 'block' }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -1201,6 +1197,20 @@ export default function Home() {
               onDeleteAccount={handleDeleteSmtpAccount}
               onResetAll={resetAll}
               onClose={() => setShowSmtpModal(false)}
+            />
+          )}
+
+          {showQuickSend && userId && (
+            <QuickSendModal
+              userId={userId}
+              roleDefs={roleDefs}
+              templates={templates}
+              automail={automail}
+              ai={ai}
+              smtpAccounts={smtpAccounts}
+              profile={profile}
+              sentTodayCount={sentTodayCount}
+              onClose={() => setShowQuickSend(false)}
             />
           )}
         </div>

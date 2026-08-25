@@ -22,6 +22,7 @@ type GlobalSettings = {
   min_pagination_delay: number;
   max_pagination_limit: number;
   allow_signups: boolean;
+  max_daily_send_limit: number;
 };
 
 export function AdminPortal() {
@@ -34,6 +35,10 @@ export function AdminPortal() {
   const [minDelay, setMinDelay] = useState(5);
   const [maxLimit, setMaxLimit] = useState(10);
   const [allowSignups, setAllowSignups] = useState(true);
+  // No billing/plan system yet (2026-08-25) — this one global ceiling stands in for it. A candidate's
+  // Dashboard shows the smaller of this, their own daily_mail_limit, and their connected SMTP accounts'
+  // pool (50/day each) — see automail.worker.js for the backend-enforced version of the same rule.
+  const [maxDailySendLimit, setMaxDailySendLimit] = useState(100);
   
   // Navigation State
   const [activeTopTab, setActiveTopTab] = useState<"global" | "users">("users");
@@ -62,6 +67,7 @@ export function AdminPortal() {
         setMinDelay(settingsData.data.min_pagination_delay || 5);
         setMaxLimit(settingsData.data.max_pagination_limit || 10);
         setAllowSignups(settingsData.data.allow_signups !== false);
+        setMaxDailySendLimit(settingsData.data.max_daily_send_limit || 100);
       }
       
       if (usersData.success) {
@@ -88,7 +94,8 @@ export function AdminPortal() {
           min_fetch_interval: minInterval,
           min_pagination_delay: minDelay,
           max_pagination_limit: maxLimit,
-          allow_signups: allowSignups
+          allow_signups: allowSignups,
+          max_daily_send_limit: maxDailySendLimit
         })
       });
       const data = await res.json();
@@ -177,6 +184,15 @@ export function AdminPortal() {
                 type="number" 
                 value={maxLimit} 
                 onChange={e => setMaxLimit(Number(e.target.value))} 
+              />
+            </label>
+            <label className="field">
+              <span>Max Daily Send Limit (per candidate)</span>
+              <input
+                type="number"
+                min={1}
+                value={maxDailySendLimit}
+                onChange={e => setMaxDailySendLimit(Number(e.target.value))}
               />
             </label>
             <label className="field">

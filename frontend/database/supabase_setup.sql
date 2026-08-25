@@ -731,3 +731,10 @@ alter table public.automailsend_role_defs
 
 alter table public.automailsend_role_defs
   add column if not exists scratch_resume_profile_id uuid references public.automailsend_resume_profiles(id) on delete set null; -- this role's "start from scratch" draft, if any
+
+
+-- 2026-08-25: account-wide daily send cap, admin-configurable, no billing/plan system yet so this is one
+-- global ceiling for now (see docs/memory.md) rather than per-user — the effective limit a candidate sees
+-- is min(this, their own automailsend_app_state.daily_mail_limit, their connected SMTP accounts' pool).
+alter table public.automailsend_global_settings
+  add column if not exists max_daily_send_limit integer not null default 100;

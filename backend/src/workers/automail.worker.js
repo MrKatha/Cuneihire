@@ -31,6 +31,15 @@ async function runAutomailJobs(supabase) {
     console.log(pc.dim(`  -> Result: Found ${users ? users.length : 0} users with automail enabled.`));
     if (!users || users.length === 0) return;
 
+    // Account-wide admin ceiling (2026-08-25) — one global number for now, no billing/plan system yet
+    // (see docs/memory.md). Fetched once per run, not per user, since it's a single global row.
+    const { data: globalSettings } = await supabase
+      .from("automailsend_global_settings")
+      .select("max_daily_send_limit")
+      .eq("id", 1)
+      .single();
+    const globalDailyLimit = globalSettings?.max_daily_send_limit || 100;
+
     for (const user of users) {
       const userId = user.user_id;
       const defaultInterval = process.env.AUTOMAIL_WORKER_INTERVAL_SEC ? parseInt(process.env.AUTOMAIL_WORKER_INTERVAL_SEC, 10) : 3;
@@ -87,9 +96,11 @@ async function runAutomailJobs(supabase) {
       // account already carries its own sent-today count via `remaining` (see smtpPool.js), so total sent
       // today across the whole pool is just the inverse of that — no extra query needed.
       const totalSentToday = pool.reduce((sum, a) => sum + Math.max(0, (a.dailyLimit || 50) - a.remaining), 0);
-      const globalLimit = user.daily_mail_limit || 50;
-      const globalRemaining = Math.max(0, globalLimit - totalSentToday);
-      const totalRemaining = Math.min(poolRemaining, globalRemaining);
+      // Smaller of: this account's own daily_mail_limit, the admin's account-wide ceiling, and what the
+      // SMTP pool can physically still send today.
+      const accountLimit = Math.min(user.daily_mail_limit || 50, globalDailyLimit);
+      const accountRemaining = Math.max(0, accountLimit - totalSentToday);
+      const totalRemaining = Math.min(poolRemaining, accountRemaining);
       if (totalRemaining <= 0) {
         // Silently skip to prevent log flooding every few seconds
         continue;
