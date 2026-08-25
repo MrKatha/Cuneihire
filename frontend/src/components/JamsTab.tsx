@@ -66,6 +66,10 @@ function formatFriendlyError(errorMsg?: string) {
 // job match what I'm looking for" is a *before-you-reach-out* question, so that discovery/scoring board
 // still lives on Jobs & Roles (JobsRolesTab.tsx); a contact sourced from a scraped post shows its match
 // score here only as read-only context.
+//
+// The "Emails" sub-tab of JamsHub.tsx (2026-08-25) — no longer its own top-level `.panel`/panel-head; that
+// shell (title, tab strip) now belongs to JamsHub, which renders this as one of three sub-tabs alongside
+// Overview and Monitoring.
 export function JamsTab({
   userId,
   recipients,
@@ -340,13 +344,9 @@ export function JamsTab({
   );
 
   return (
-    <section className="panel">
-      <div className="panel-head">
-        <div>
-          <h2>JAMS</h2>
-          <span className="hint compact">Every contact you&apos;ve found, scraped or manual — matched, contacted, and tracked in one place</span>
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", fontSize: "0.8rem" }}>
+    <div>
+      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: "0.5rem" }}>
+        <span style={{ display: "flex", alignItems: "center", gap: "0.5rem", fontSize: "0.8rem" }}>
           <span style={{ color: "var(--muted)" }}>Daily mail limit:</span>
           <span style={{
             background: "var(--bg)",
@@ -367,7 +367,7 @@ export function JamsTab({
             }} />
             {sentTodayCount} / {automail.dailyLimit}
           </span>
-        </div>
+        </span>
       </div>
       <div className="panel-body">
         {sentTodayCount >= automail.dailyLimit && (
@@ -683,6 +683,6 @@ export function JamsTab({
         document.body
       )}
 
-    </section>
+    </div>
   );
 }

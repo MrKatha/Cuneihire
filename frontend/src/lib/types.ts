@@ -414,6 +414,12 @@ export type AutoFetchConfig = {
   postAgeFilter: "any" | "past-24h" | "past-week" | "past-month";
 };
 
+// Shared "is LinkedIn actually connected" check (2026-08-25) — both cookies present, not just one. Used by
+// JamsOverviewTab.tsx's read-only status and SettingsTab.tsx's Connections row so the two can't drift.
+export function autoFetchLinkedInConnected(config: AutoFetchConfig): boolean {
+  return !!(config.liAt && config.liAt.trim() && config.jsessionid && config.jsessionid.trim());
+}
+
 export type AutomailConfig = {
   enabled: boolean;
   dailyLimit: number;

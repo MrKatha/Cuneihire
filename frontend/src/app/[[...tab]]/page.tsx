@@ -21,8 +21,8 @@ import { RoleTemplates } from "@/components/RoleTemplates";
 import { EmailConfigTab } from "@/components/EmailConfigTab";
 import { ResumeBuilder } from "@/components/ResumeBuilder";
 import { SmtpConfigPanel } from "@/components/SmtpConfigPanel";
-import { JamsTab } from "@/components/JamsTab";
-import { DashboardTab } from "@/components/DashboardTab";
+import { JamsHub } from "@/components/JamsHub";
+import { SettingsTab } from "@/components/SettingsTab";
 import { QuickSendModal } from "@/components/QuickSendModal";
 import { ProfileTab } from "@/components/ProfileTab";
 import { JobsRolesTab } from "@/components/JobsRolesTab";
@@ -84,13 +84,13 @@ import {
 // selection) are two separate tabs again (2026-08-19, operator follow-up) — briefly merged into one
 // section with an internal sub-tab toggle, reverted for easier navigation: real sidebar entries beat a
 // toggle buried inside one page. See docs/architecture.md.
-const TAB_NAMES = ["dashboard", "emails", "profile", "roles", "board", "templates", "resumes", "ai", "settings", "recruiter", "admin"] as const;
+const TAB_NAMES = ["emails", "profile", "roles", "board", "templates", "resumes", "ai", "settings", "recruiter", "admin"] as const;
 type TabName = typeof TAB_NAMES[number];
 
 export default function Home() {
   const router = useRouter();
 
-  const [activeTab, setActiveTab] = useState<TabName>("dashboard");
+  const [activeTab, setActiveTab] = useState<TabName>("emails");
   // Resumes tab's own Builder/Library sub-tab now lives inside ResumeBuilder itself, alongside the
   // From-your-profile/Start-from-scratch mode (2026-08-24, UI pass) — see that component's resumeSubTab
   // state comment.
@@ -119,7 +119,7 @@ export default function Home() {
 
   useEffect(() => {
     if (typeof window !== "undefined") {
-      const currentTab = window.location.pathname.replace('/', '') || 'dashboard';
+      const currentTab = window.location.pathname.replace('/', '') || 'emails';
       if (TAB_NAMES.includes(currentTab as TabName)) {
         setActiveTab(currentTab as TabName);
       }
@@ -175,8 +175,9 @@ export default function Home() {
   // same behavior as every other account. See storage.ts's PersistedState comment.
   const [maxKeywords, setMaxKeywords] = useState(defaultState().maxKeywords);
   const [minFetchIntervalOverride, setMinFetchIntervalOverride] = useState(defaultState().minFetchIntervalOverride);
-  // Dashboard's daily-limit ceiling (2026-08-25) — admin-configurable, one global number for now (no
-  // billing/plan system yet). Public route, no auth needed, same as allow_signups on the signup page.
+  // Automation's daily-limit ceiling, shown on JAMS's Overview sub-tab (2026-08-25) — admin-configurable,
+  // one global number for now (no billing/plan system yet). Public route, no auth needed, same as
+  // allow_signups on the signup page.
   const [globalMaxDailyLimit, setGlobalMaxDailyLimit] = useState(100);
   useEffect(() => {
     fetch("/api/public/settings")
@@ -195,10 +196,9 @@ export default function Home() {
 
   const [showAutoFetch, setShowAutoFetch] = useState(false);
   const [showSmtpModal, setShowSmtpModal] = useState(false);
-  // Lifted from JamsTab (2026-08-25, operator ask — Quick Send moved to the new Dashboard tab).
+  // Lifted from JamsTab (2026-08-25, operator ask — Quick Send moved to JAMS's Overview sub-tab).
   const [showQuickSend, setShowQuickSend] = useState(false);
 
-  const [showPasswordChange, setShowPasswordChange] = useState(false);
   const [newPassword, setNewPassword] = useState("");
   const [passwordLoading, setPasswordLoading] = useState(false);
   
@@ -839,12 +839,8 @@ export default function Home() {
           <Wordmark />
         </div>
         <nav className="sidebar-nav">
-          <button
-            className={`sidebar-tab ${activeTab === 'dashboard' ? 'active' : ''}`}
-            onClick={() => handleTabChange('dashboard')}
-          >
-            Dashboard
-          </button>
+          {/* JAMS is the app's landing page now (2026-08-25, operator ask — "just keep like jams as our
+              main dashboard") — its own Overview sub-tab covers what the old standalone Dashboard tab did. */}
           <button
             className={`sidebar-tab ${activeTab === 'emails' ? 'active' : ''}`}
             onClick={() => handleTabChange('emails')}
@@ -976,37 +972,24 @@ export default function Home() {
             />
           )}
 
-          {activeTab === 'dashboard' && (
-            <DashboardTab
+          {activeTab === 'emails' && (
+            <JamsHub
               userId={userId}
               profile={profile}
               automail={automail}
               onAutomailChange={setAutomail}
               smtpAccounts={smtpAccounts}
-              autoFetch={autoFetch}
               sentTodayCount={sentTodayCount}
               globalMaxDailyLimit={globalMaxDailyLimit}
               aiCredits={aiCredits}
               sentLog={sentLog}
-              onOpenSmtp={() => setShowSmtpModal(true)}
-              onOpenAutoFetch={() => setShowAutoFetch(true)}
               onOpenQuickSend={() => setShowQuickSend(true)}
-            />
-          )}
-
-          {activeTab === 'emails' && (
-            <JamsTab
-              userId={userId}
               recipients={recipients}
               roleDefs={roleDefs}
               templates={templates}
               config={config}
-              automail={automail}
-              smtpAccounts={smtpAccounts}
-              sentLog={sentLog}
               onSentLogChange={setSentLog}
               replies={replies}
-              sentTodayCount={sentTodayCount}
               sending={sending}
               onSendingChange={setSending}
               delaySec={delaySec}
@@ -1112,83 +1095,31 @@ export default function Home() {
               <div style={{ fontSize: "3rem", marginBottom: "1rem" }}>🔒</div>
               <h2 className="panel-title" style={{ color: "var(--err)" }}>Access Denied</h2>
               <p className="hint">You do not have administrative privileges to view this portal.</p>
-              <button className="btn primary" onClick={() => handleTabChange('dashboard')} style={{ margin: "1rem auto 0" }}>
-                Return to Dashboard
+              <button className="btn primary" onClick={() => handleTabChange('emails')} style={{ margin: "1rem auto 0" }}>
+                Return to JAMS
               </button>
             </div>
           )}
 
           {activeTab === 'settings' && (
-            <div className="panel flex-col gap-4">
-              <h2 className="panel-title">Application Settings</h2>
-              <div className="smtp-bar" style={{ marginTop: '0.5rem' }}>
-                <div className="smtp-bar-left">
-                  <span className="smtp-bar-title">Account & SMTP Settings</span>
-                  <span className={smtpAccounts.some(a => a.isVerified && a.isActive) ? "badge ok" : "badge warn"}>
-                    {smtpAccounts.length === 0 ? "Setup needed" : `${smtpAccounts.filter(a => a.isVerified && a.isActive).length} account(s) ready`}
-                  </span>
-                </div>
-                <div className="smtp-bar-actions">
-                  <button type="button" className="btn primary" onClick={() => setShowSmtpModal(true)}>
-                    Expand
-                  </button>
-                </div>
-              </div>
-              <div className="smtp-bar" style={{ marginTop: '0.5rem' }}>
-                <div className="smtp-bar-left">
-                  <span className="smtp-bar-title">LinkedIn Scraper Settings</span>
-                  <span className={autoFetch.enabled ? "badge ok" : "badge warn"}>
-                    {autoFetch.enabled ? "Active" : "Disabled"}
-                  </span>
-                </div>
-                <div className="smtp-bar-actions">
-                  <button type="button" className="btn primary" onClick={() => setShowAutoFetch(true)}>
-                    Expand
-                  </button>
-                </div>
-              </div>
-
-              {/* "Activate Automation" moved to the new Dashboard tab (2026-08-25, operator ask — "the
-                  toggle for the automation should obviously be in our dashboard"). It briefly lived here
-                  as an inline row (see docs/memory.md) before that; Settings no longer duplicates it. */}
-
-              <div className="smtp-bar" style={{ marginTop: '0.5rem', display: 'block' }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <div className="smtp-bar-left">
-                    <span className="smtp-bar-title">Login Password</span>
-                  </div>
-                  <div className="smtp-bar-actions">
-                    <button type="button" className="btn primary" onClick={() => setShowPasswordChange(!showPasswordChange)}>
-                      {showPasswordChange ? "Collapse" : "Expand"}
-                    </button>
-                  </div>
-                </div>
-                {showPasswordChange && (
-                  <div style={{ marginTop: '1rem', paddingTop: '1rem', borderTop: '1px solid var(--line)' }}>
-                    <p className="hint compact" style={{ marginBottom: '0.75rem' }}>Update the password you use to log into Cuneihire.</p>
-                    <form onSubmit={handlePasswordChange} className="grid-2" style={{ alignItems: "flex-end" }}>
-                      <label className="field">
-                        <span>New Password</span>
-                        <input
-                          type="password"
-                          value={newPassword}
-                          onChange={(e) => setNewPassword(e.target.value)}
-                          placeholder="Min 6 characters"
-                          disabled={passwordLoading}
-                        />
-                      </label>
-                      <button
-                        type="submit"
-                        className="btn primary"
-                        disabled={passwordLoading || !newPassword}
-                      >
-                        {passwordLoading ? "Updating..." : "Update Password"}
-                      </button>
-                    </form>
-                  </div>
-                )}
-              </div>
-            </div>
+            <SettingsTab
+              smtpAccounts={smtpAccounts}
+              autoFetch={autoFetch}
+              onOpenSmtp={() => setShowSmtpModal(true)}
+              onOpenAutoFetch={() => setShowAutoFetch(true)}
+              recipients={recipients}
+              templates={templates}
+              roleDefs={roleDefs}
+              activeRole={activeTemplateRole}
+              onActiveRoleChange={setActiveTemplateRole}
+              onUpdateRoleRules={handleUpdateRoleRules}
+              profile={profile}
+              onGoToResumes={() => handleTabChange('resumes')}
+              newPassword={newPassword}
+              onNewPasswordChange={setNewPassword}
+              passwordLoading={passwordLoading}
+              onPasswordChangeSubmit={handlePasswordChange}
+            />
           )}
 
           {showAutoFetch && (
