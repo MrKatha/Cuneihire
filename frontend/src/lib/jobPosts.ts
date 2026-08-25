@@ -5,6 +5,17 @@
 // two screens can't drift on what "70" or "no score yet" means (see docs/memory.md for why this moved).
 import type { Recipient } from "./types";
 
+// Defensive fix (2026-08-25) for a real backend bug (now also fixed at the source in
+// extraction.service.js): older scraped rows can have `source_url` as several LinkedIn post URLs joined
+// with ", " into one string (a known legacy-extractor limitation — see that file's comment), which made
+// "View post" links 404 since the joined string was never a valid URL. Already-stored rows won't rewrite
+// themselves, so every render site takes just the first URL rather than trusting the raw column value.
+export function firstUrl(raw?: string | null): string | undefined {
+  if (!raw) return undefined;
+  const first = raw.split(",")[0]?.trim();
+  return first || undefined;
+}
+
 export type JobPostGroup = {
   jobPostId: string;
   role: string;
@@ -28,7 +39,7 @@ export function groupRecipientsByJobPost(recipients: Recipient[]): JobPostGroup[
         role: r.role,
         authorName: r.author_name,
         contextText: r.context_text,
-        sourceUrl: r.source_url,
+        sourceUrl: firstUrl(r.source_url),
         scrapedAt: r.scraped_at,
         matchScore: r.match_score ?? null,
         matchReasoning: r.match_reasoning ?? null,

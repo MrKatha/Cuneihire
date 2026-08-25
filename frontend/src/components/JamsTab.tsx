@@ -18,7 +18,7 @@ import {
   type SmtpAccount,
   type SmtpConfig,
 } from "@/lib/types";
-import { matchScoreTone } from "@/lib/jobPosts";
+import { matchScoreTone, firstUrl } from "@/lib/jobPosts";
 import { StatusPill } from "./JobPostCard";
 import { ExecutionLogsPanel } from "./ExecutionLogsPanel";
 import { QuickSendModal } from "./QuickSendModal";
@@ -545,9 +545,9 @@ export function JamsTab({
                         ) : (
                           <span className="hint">—</span>
                         )}
-                        {r.source_url && (
+                        {firstUrl(r.source_url) && (
                           <div>
-                            <a href={r.source_url} target="_blank" rel="noopener noreferrer" className="msg" style={{ color: "var(--accent)" }}>
+                            <a href={firstUrl(r.source_url)} target="_blank" rel="noopener noreferrer" className="msg" style={{ color: "var(--accent)" }}>
                               View post ↗
                             </a>
                           </div>

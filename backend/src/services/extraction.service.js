@@ -241,7 +241,14 @@ function extractInitialContacts(rawStr) {
 
   const urlMatches = cleanText.match(/"postSlugUrl"\s*:\s*"([^"]+)"/g) || [];
   const uniqueUrls = [...new Set(urlMatches.map(m => m.match(/"postSlugUrl"\s*:\s*"([^"]+)"/)[1]))];
-  const source_urls = uniqueUrls.join(", ");
+  // 2026-08-25 fix: this used to be `uniqueUrls.join(", ")` — a comma-joined string of every post URL
+  // found on the page, stamped onto every contact from that page (see this section's header comment on
+  // the known per-contact-attribution limitation). That string was never a valid single URL, so every
+  // "View post" link in JAMS was broken — clicking it tried to navigate to the literal joined string.
+  // No per-contact attribution exists in this legacy path (that's the whole reason it's legacy), so
+  // there's no way to pick the *correct* one of several URLs found on a page — but the first one found is
+  // a real, clickable, still-usually-relevant link, which beats a guaranteed-broken one every time.
+  const source_urls = uniqueUrls[0] || null;
 
   return { emails: uniqueEmails, phones: uniquePhones, source_urls, contextText: cleanText.substring(0, 5000) };
 }
@@ -276,7 +283,8 @@ function extractPaginatedContacts(rawStr) {
 
   const urlMatches = cleanText.match(/"postSlugUrl"\s*:\s*"([^"]+)"/g) || [];
   const uniqueUrls = [...new Set(urlMatches.map(m => m.match(/"postSlugUrl"\s*:\s*"([^"]+)"/)[1]))];
-  const source_urls = uniqueUrls.join(", ");
+  // Same fix as extractInitialContacts above — a single real URL, not a broken comma-joined string.
+  const source_urls = uniqueUrls[0] || null;
 
   return { emails, phones: [...new Set([...wa, ...phones])], source_urls, contextText: text.substring(0, 5000) };
 }
