@@ -11,7 +11,9 @@ import { isCompanyEmail } from "@/lib/companyEmail";
 type AccountType = "candidate" | "recruiter";
 
 export default function SignUpPage() {
-  const [accountType, setAccountType] = useState<AccountType>("candidate");
+  // setAccountType removed (2026-08-25) along with the toggle UI below — see that comment. Add it back
+  // alongside the toggle buttons when the recruiter phase starts.
+  const [accountType] = useState<AccountType>("candidate");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -99,32 +101,10 @@ export default function SignUpPage() {
           </div>
         ) : (
           <form onSubmit={handleSignUp} className="space-y-5">
-          <div className="field">
-            <span>I&apos;m signing up as a…</span>
-            <div style={{ display: "flex", gap: "0.5rem", marginTop: "0.35rem" }}>
-              <button
-                type="button"
-                className={`btn ${accountType === "candidate" ? "primary" : "ghost"}`}
-                style={{ flex: 1, justifyContent: "center" }}
-                onClick={() => setAccountType("candidate")}
-              >
-                Candidate
-              </button>
-              <button
-                type="button"
-                className={`btn ${accountType === "recruiter" ? "primary" : "ghost"}`}
-                style={{ flex: 1, justifyContent: "center" }}
-                onClick={() => setAccountType("recruiter")}
-              >
-                Recruiter
-              </button>
-            </div>
-            <p className="hint compact" style={{ marginTop: "0.35rem" }}>
-              {accountType === "recruiter"
-                ? "Recruiter accounts need a company email — this can't be changed later."
-                : "One email is one account type for good — sign up separately for a recruiter account."}
-            </p>
-          </div>
+          {/* Recruiter signup toggle disabled for now (2026-08-25) — recruiter is its own phase with its
+              own profile/portal that isn't built yet; every signup is a candidate account until then.
+              `accountType` below stays wired (defaults to "candidate") so re-enabling this is just:
+              restore `setAccountType` above and the toggle buttons removed here. */}
           <label className="field">
             <span>Email</span>
             <input

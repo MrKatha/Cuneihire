@@ -866,12 +866,11 @@ export default function Home() {
           >
             Settings
           </button>
-          <button
-            className={`sidebar-tab ${activeTab === 'recruiter' ? 'active' : ''}`}
-            onClick={() => handleTabChange('recruiter')}
-          >
-            Recruiter 🧑‍💼
-          </button>
+          {/* Recruiter sidebar entry hidden for now (2026-08-25, operator ask) — recruiter is its own
+              phase with its own profile/portal not built yet; candidates shouldn't see it as an option
+              right now. Signup's account-type toggle is disabled the same way (see signup/page.tsx), so
+              no new recruiter accounts can be created either. The tab/route/RecruiterTab.tsx are all left
+              intact for when that phase starts — this is a one-button revert. */}
           {isAdmin && (
             <button 
               className={`sidebar-tab ${activeTab === 'admin' ? 'active' : ''}`}
