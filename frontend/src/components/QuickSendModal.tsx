@@ -35,19 +35,31 @@ function uid() {
   return crypto.randomUUID();
 }
 
-// "auto" = this role's configured manual template (RoleDef.selectedTemplateId), or its first template if
-// none is explicitly selected — deterministic, no re-roll (2026-08-19: randomization removed). A role set
-// to "Let AI choose" still falls back to this deterministic behavior here, since that mode needs a
-// scraped job post's context to work from and Quick Send is a one-off hand-added HR contact with no such
-// context — see the hint text below the picker. "custom" = write it yourself. Otherwise, a specific
-// template's id — its exact content, editable, and guaranteed to be what sends.
-type TemplatePick = "auto" | "custom" | string;
+// The three ways a Quick Send message can be composed (2026-08-25, operator ask — "the option should not
+// rely on whatever the default option is. It should let me choose") — replaces the old implicit "auto"
+// pick, which silently used a role's configured template with no explicit choice made. Now nothing is
+// pre-filled until the candidate actively picks one of these:
+//  - "write": blank subject/body, fully manual.
+//  - "ai": AI drafts the whole email from scratch (candidate info + recipient details) via the same
+//    /api/ai-enhance endpoint the old "Enhance" button used — that endpoint already handles an empty draft
+//    gracefully ("write generically but do not invent specifics"), so no separate generation endpoint was
+//    needed.
+//  - "template": pick one of this role's saved templates from a dropdown; its content loads in, editable.
+// Subject and body are editable in every mode now (2026-08-25, same ask — "allow me to edit the subject as
+// well in the quick send"), not gated behind which mode is active.
+type ComposeMode = "write" | "ai" | "template";
 
-// The modal behind JamsTab's "+ Quick Send" button — one HR contact, its content sourced from the role's
-// template library (auto/specific/custom), attachments resolved from the ROLE's own resume + additional
-// files (see lib/emailResolve.ts's resolveRoleAttachments — same set a role always attaches, not
-// per-template), optionally AI-polished, sent immediately via /api/send (synchronous — see
-// docs/architecture.md) rather than the delayed batch queue everything else in JAMS uses.
+const COMPOSE_MODES: { value: ComposeMode; label: string; hint: string }[] = [
+  { value: "write", label: "Write it myself", hint: "Start from a blank subject and body — full manual control." },
+  { value: "ai", label: "Let AI write it", hint: "AI drafts the email from your candidate info — review before sending." },
+  { value: "template", label: "Use a template", hint: "Pick one of this role's saved templates — still editable after." },
+];
+
+// The modal behind Dashboard's "+ Quick Send" button — one HR contact, its content composed via an explicit
+// write/AI/template choice (see ComposeMode above), attachments resolved from the ROLE's own resume (see
+// lib/emailResolve.ts's resolveRoleAttachments — same set a role always attaches, not per-template), sent
+// immediately via /api/send (synchronous — see docs/architecture.md) rather than the delayed batch queue
+// everything else in JAMS uses.
 export function QuickSendModal({
   userId,
   roleDefs,
@@ -77,34 +89,39 @@ export function QuickSendModal({
   const roleTemplates = useMemo(() => templates[role] || [], [templates, role]);
   const roleDef = useMemo(() => roleDefs.find((d) => d.key === role) || null, [roleDefs, role]);
 
-  const [templatePick, setTemplatePick] = useState<TemplatePick>("auto");
+  const [composeMode, setComposeMode] = useState<ComposeMode>("write");
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
 
-  // Reset the pick (and draft) when the role changes — a different role's template ids don't apply.
+  const selectedTemplate: RoleTemplate | null = roleTemplates.find((t) => t.id === selectedTemplateId) || null;
+
+  // Switching compose mode starts that mode's content fresh — the three are meant as distinct starting
+  // points, not stacked on top of each other's leftover draft.
   useEffect(() => {
-    setTemplatePick(roleTemplates.length > 0 ? "auto" : "custom");
+    setSelectedTemplateId(null);
+    setSubject("");
+    setBody("");
+  }, [composeMode]);
+
+  // A different role's template ids don't apply, and previously-picked content may no longer make sense —
+  // clear the template pick when the role changes (only matters in "template" mode; "write"/"ai" drafts are
+  // left alone since they're not tied to a specific role's templates).
+  useEffect(() => {
+    setSelectedTemplateId(null);
+    if (composeMode === "template") {
+      setSubject("");
+      setBody("");
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [role]);
 
-  const autoTemplate: RoleTemplate | null =
-    roleTemplates.find((t) => t.id === roleDef?.selectedTemplateId) || roleTemplates[0] || null;
-
-  const previewTemplate: RoleTemplate | null =
-    templatePick === "custom" ? null : templatePick === "auto" ? autoTemplate : roleTemplates.find((t) => t.id === templatePick) || null;
-
-  const fieldsEditable = templatePick !== "auto";
-
-  // Load the picked template's content into the editable draft whenever the pick changes (auto shows a
-  // read-only preview; a specific template's content is editable and IS what sends).
-  useEffect(() => {
-    if (templatePick === "custom") {
-      setSubject("");
-      setBody("");
-    } else if (previewTemplate) {
-      setSubject(previewTemplate.subject);
-      setBody(previewTemplate.content);
+  function selectTemplate(id: string) {
+    setSelectedTemplateId(id);
+    const t = roleTemplates.find((x) => x.id === id);
+    if (t) {
+      setSubject(t.subject);
+      setBody(t.content);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [templatePick, role]);
+  }
 
   const aiReady = ai.enabled;
 
@@ -115,6 +132,9 @@ export function QuickSendModal({
     setBody((b) => (b && !b.endsWith("\n") && !b.endsWith(" ") ? `${b} ${token}` : `${b}${token}`));
   }
 
+  // Backs "Let AI write it" — also doubles as a "polish this draft" call when subject/body are already
+  // non-empty (the underlying endpoint handles both: "if a draft is already provided, preserve its intent
+  // ... polish"), so the same handler serves both the initial "Generate" click and a later "Regenerate".
   async function enhance() {
     if (!aiReady) {
       toast.error("Enable AI Personalization on the AI tab first.");
@@ -143,7 +163,7 @@ export function QuickSendModal({
       if (!res.ok || !data.success) throw new Error(data.error || "AI enhancement failed.");
       setSubject(data.subject);
       setBody(data.body);
-      toast.success("Draft enhanced — review before sending.");
+      toast.success("Draft ready — review before sending.");
     } catch (e: any) {
       toast.error(e?.message || "AI enhancement failed.");
     } finally {
@@ -173,14 +193,10 @@ export function QuickSendModal({
         return;
       }
 
-      // No randomization to re-roll any more (2026-08-19) — "auto" is deterministic, so the read-only
-      // preview already IS what sends.
-      const usedTemplate = templatePick === "custom" ? null : previewTemplate;
-
       finalSubject = applyPlaceholders(finalSubject, { email, title: jobTitle, author_name: hrName }, profile);
       finalBody = applyPlaceholders(finalBody, { email, title: jobTitle, author_name: hrName }, profile);
       if (!finalSubject.trim() || !finalBody.trim()) {
-        toast.error("Subject and body can't be empty — use a template, write one, or enhance with AI first.");
+        toast.error("Subject and body can't be empty — use a template, write one, or let AI write it first.");
         return;
       }
       if (hasUnresolvedPlaceholders(finalSubject) || hasUnresolvedPlaceholders(finalBody)) {
@@ -231,7 +247,7 @@ export function QuickSendModal({
           status: sendRes.ok && sendData.success ? "sent" : "failed",
           error: sendData.error,
           sentAt: new Date().toISOString(),
-          templateLabel: templatePick === "custom" ? "Custom" : usedTemplate?.label,
+          templateLabel: composeMode === "template" ? selectedTemplate?.label : composeMode === "ai" ? "AI-written" : "Custom",
           resumeLabel: describeFiles(roleFiles),
         });
 
@@ -315,26 +331,56 @@ export function QuickSendModal({
             </label>
           </div>
 
-          <label className="field">
-            <span>Template</span>
-            <select value={templatePick} onChange={(e) => setTemplatePick(e.target.value)} disabled={saving}>
-              {roleTemplates.length > 0 && <option value="auto">Auto (this role&apos;s template)</option>}
-              <option value="custom">Custom — write it yourself</option>
-              {roleTemplates.map((t) => (
-                <option key={t.id} value={t.id}>{t.label}</option>
+          <div className="template-card single" style={{ padding: "1rem" }}>
+            <h3 style={{ margin: "0 0 0.6rem", fontSize: "0.9rem" }}>How do you want to write this email?</h3>
+            <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+              {COMPOSE_MODES.map((m) => (
+                <label key={m.value} style={{ display: "flex", gap: "0.5rem", alignItems: "flex-start", cursor: "pointer" }}>
+                  <input
+                    type="radio"
+                    name="composeMode"
+                    checked={composeMode === m.value}
+                    onChange={() => setComposeMode(m.value)}
+                    disabled={saving}
+                    style={{ marginTop: "0.25rem" }}
+                  />
+                  <span>
+                    <strong style={{ fontSize: "0.82rem" }}>{m.label}</strong>
+                    <div className="hint compact" style={{ margin: 0 }}>{m.hint}</div>
+                  </span>
+                </label>
               ))}
-            </select>
-          </label>
+            </div>
 
-          {templatePick === "auto" && (
-            <p className="hint compact">
-              {autoTemplate
-                ? roleDef && (roleDef.emailSendMode === "ai-select" || roleDef.emailSendMode === "ai-write")
-                  ? `This role is set to "${roleDef.emailSendMode === "ai-select" ? "Let AI choose" : "Let AI write it"}" for automated sends — Quick Send has no job post for AI to work from, so it uses "${autoTemplate.label}" directly. Pick a specific template above to customize the wording, or Custom to write your own.`
-                  : `Will use "${autoTemplate.label}" — pick a specific template above to customize the wording, or Custom to write your own.`
-                : "No template selected for this role yet — pick one above, or Custom to write your own."}
-            </p>
-          )}
+            {composeMode === "template" && (
+              <div style={{ marginTop: "0.75rem" }}>
+                {roleTemplates.length > 0 ? (
+                  <label className="field" style={{ margin: 0 }}>
+                    <span>Template</span>
+                    <select value={selectedTemplateId || ""} onChange={(e) => selectTemplate(e.target.value)} disabled={saving}>
+                      <option value="" disabled>Choose a template…</option>
+                      {roleTemplates.map((t) => (
+                        <option key={t.id} value={t.id}>{t.label}</option>
+                      ))}
+                    </select>
+                  </label>
+                ) : (
+                  <p className="hint compact" style={{ margin: 0 }}>
+                    No templates saved for &quot;{roleLabel(roleDefs, role)}&quot; yet — add one on the Templates tab, or pick another option above.
+                  </p>
+                )}
+              </div>
+            )}
+
+            {composeMode === "ai" && (
+              <div style={{ marginTop: "0.75rem", display: "flex", alignItems: "center", gap: "0.6rem", flexWrap: "wrap" }}>
+                <button type="button" className="btn primary" onClick={enhance} disabled={saving || enhancing || !aiReady}>
+                  {enhancing ? "Generating…" : subject || body ? "🔄 Regenerate" : "✨ Generate with AI"}
+                </button>
+                {!aiReady && <span className="hint compact">Enable AI Personalization on the AI tab first.</span>}
+              </div>
+            )}
+          </div>
 
           <label className="field">
             <span>Subject</span>
@@ -343,7 +389,7 @@ export function QuickSendModal({
               value={subject}
               onChange={(e) => setSubject(e.target.value)}
               placeholder="Application for {{title}}"
-              disabled={saving || !fieldsEditable}
+              disabled={saving}
             />
           </label>
 
@@ -353,8 +399,8 @@ export function QuickSendModal({
               value={body}
               maxHeight={280}
               onChange={(e) => setBody(e.target.value)}
-              placeholder="Write your message, or use a template / AI enhance below…"
-              disabled={saving || !fieldsEditable}
+              placeholder={composeMode === "ai" ? "Click Generate with AI above, or write it yourself…" : "Write your message…"}
+              disabled={saving}
             />
           </label>
 
@@ -362,7 +408,7 @@ export function QuickSendModal({
             <select
               value=""
               onChange={(e) => insertVariable(e.target.value)}
-              disabled={saving || !fieldsEditable}
+              disabled={saving}
               style={{ fontSize: "0.8rem" }}
             >
               <option value="">Insert variable…</option>
@@ -370,16 +416,6 @@ export function QuickSendModal({
                 <option key={v.token} value={v.token}>{v.token} — {v.label}</option>
               ))}
             </select>
-            <button
-              type="button"
-              className="btn ghost"
-              style={{ color: "var(--accent)" }}
-              onClick={enhance}
-              disabled={saving || enhancing || !aiReady || !fieldsEditable}
-              title={!fieldsEditable ? "Pick a specific template or Custom to enhance a draft" : aiReady ? "Polish the current draft with AI" : "Enable AI Personalization on the AI tab first"}
-            >
-              {enhancing ? "Enhancing…" : "✨ Enhance with AI"}
-            </button>
             {roleFiles.length > 0 && (
               <span className="hint compact">📎 {roleFiles.length} attachment{roleFiles.length === 1 ? "" : "s"} from this role will be included</span>
             )}

@@ -3,9 +3,10 @@
 import { useState } from "react";
 import toast from "react-hot-toast";
 import { AttachmentPreviewModal } from "./AttachmentPreviewModal";
+import { ResumeSourceBadge } from "./ResumeSourceBadge";
 import { type Attachment, type CandidateProfile } from "@/lib/types";
 import { deleteAttachment, uploadAttachment } from "@/lib/storage";
-import { isNameTaken } from "@/lib/resumeNaming";
+import { isNameTaken, resumeSource } from "@/lib/resumeNaming";
 
 type Props = {
   userId: string | null;
@@ -44,10 +45,13 @@ type Props = {
 // "Resume name" writes to from Builder — since the name is literally the filename recipients see
 // (Attachment.name === nodemailer's `filename`, confirmed in automail.worker.js/batchSend.worker.js).
 //
-// Names must stay unique across the whole Library (2026-08-20, same-day follow-up, operator ask — "it's
-// better not to have the same names... block and ask me to rename") — uploading or renaming to a name
-// that's already in use is blocked with an inline error instead of silently applying, same guard
-// ResumeBuilder.tsx's Save/Sync flows use (see lib/resumeNaming.ts's isNameTaken).
+// Names must stay unique within each source category (2026-08-20, same-day follow-up, operator ask — "it's
+// better not to have the same names... block and ask me to rename"; scoped per category 2026-08-25, operator
+// ask — "in one category there should not be two resumes that have the same name") — uploading or renaming
+// to a name already used by another resume of the same origin is blocked with an inline error instead of
+// silently applying, same guard ResumeBuilder.tsx's Save/Sync flows use (see lib/resumeNaming.ts's
+// isNameTaken/resumeSource). Each row also shows its source (Uploaded/From scratch/Based on your profile)
+// via ResumeSourceBadge, next to the "Default" badge.
 export function ResumeConfigTab({ userId, profile, onProfileChange }: Props) {
   const [previewFile, setPreviewFile] = useState<Attachment | null>(null);
   const [fileUploading, setFileUploading] = useState(false);
@@ -60,8 +64,8 @@ export function ResumeConfigTab({ userId, profile, onProfileChange }: Props) {
 
   async function handleUploadFile(file: File) {
     if (!userId) return;
-    if (isNameTaken(file.name, profile.files)) {
-      setNameError(`"${file.name}" is already used by another resume in your Library — rename the file and try again.`);
+    if (isNameTaken(file.name, profile.files, "upload")) {
+      setNameError(`"${file.name}" is already used by another uploaded resume — rename the file and try again.`);
       return;
     }
     setNameError(null);
@@ -95,8 +99,9 @@ export function ResumeConfigTab({ userId, profile, onProfileChange }: Props) {
     if (!renamingId) return;
     const trimmed = renameValue.trim();
     if (!trimmed) { setRenamingId(null); return; }
-    if (isNameTaken(trimmed, profile.files, renamingId)) {
-      setNameError(`"${trimmed}" is already used by another resume in your Library — pick a different name.`);
+    const target = profile.files.find((f) => f.id === renamingId);
+    if (target && isNameTaken(trimmed, profile.files, resumeSource(target), renamingId)) {
+      setNameError(`"${trimmed}" is already used by another resume in the same category — pick a different name.`);
       return; // keep editing open so the name can be fixed
     }
     setNameError(null);
@@ -163,6 +168,7 @@ export function ResumeConfigTab({ userId, profile, onProfileChange }: Props) {
                     <button type="button" className="file-name-btn" onClick={() => startRename(f)} title="Click to rename">
                       {f.name}
                       {f.id === profile.globalResumeId && <span className="badge ok" style={{ marginLeft: "0.4rem", fontSize: "0.62rem" }}>Default</span>}
+                      <ResumeSourceBadge file={f} />
                     </button>
                   )}
                 </label>

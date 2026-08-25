@@ -299,7 +299,7 @@ export function ResumeBuilder({ userId, candidateProfile, onProfileChange, profi
     attemptedAutoDefaultRoles.current.add(active.id);
     const roleId = active.id;
     const draft = composeResumeData(candidateProfile, active);
-    const name = uniqueNameFallback(`${candidateProfile.name || "My Resume"} — ${active.label}`, candidateProfile.files);
+    const name = uniqueNameFallback(`${candidateProfile.name || "My Resume"} — ${active.label}`, candidateProfile.files, "profile");
     (async () => {
       try {
         const attachment = await generateResumePdf({ id: "auto", label: name, templateId: "modern", data: draft }, userId);
@@ -467,8 +467,8 @@ export function ResumeBuilder({ userId, candidateProfile, onProfileChange, profi
     // isn't a collision). See finalizeProfileResumeSave's `alwaysNewInstance` param.
     const prevFile = active.resumeId ? candidateProfile.files.find((f) => f.id === active.resumeId) : null;
     const excludeId = prevFile && prevFile.sourceRoleId === active.id ? prevFile.id : undefined;
-    if (isNameTaken(profileResumeName, candidateProfile.files, excludeId)) {
-      setNameError(`"${profileResumeName.trim()}" is already used by another resume in your Library — pick a different name.`);
+    if (isNameTaken(profileResumeName, candidateProfile.files, "profile", excludeId)) {
+      setNameError(`"${profileResumeName.trim()}" is already used by another resume based on your profile — pick a different name.`);
       return;
     }
     await finalizeProfileResumeSave(currentDraft, candidateProfile, {}, profileResumeName, true, false);
@@ -526,8 +526,8 @@ export function ResumeBuilder({ userId, candidateProfile, onProfileChange, profi
     // Defense in depth — the callers above already checked this against the pre-save state so the operator
     // sees the error before any PDF gets generated; re-checking here catches the rare race where files
     // changed in between (e.g. another tab).
-    if (isNameTaken(trimmed, baseProfile.files, replaceInPlace ? prevFile?.id : undefined)) {
-      setNameError(`"${trimmed}" is already used by another resume in your Library — pick a different name.`);
+    if (isNameTaken(trimmed, baseProfile.files, "profile", replaceInPlace ? prevFile?.id : undefined)) {
+      setNameError(`"${trimmed}" is already used by another resume based on your profile — pick a different name.`);
       return;
     }
     setNameError(null);
@@ -576,8 +576,8 @@ export function ResumeBuilder({ userId, candidateProfile, onProfileChange, profi
     if (!userId || !active || !scratchProfile) return;
     // Same block-and-ask name guard as profile mode's Save (2026-08-20) — this always appends a new
     // Attachment too, named from the "Resume name" field above (scratchLabel).
-    if (isNameTaken(scratchLabel, candidateProfile.files)) {
-      setNameError(`"${scratchLabel.trim()}" is already used by another resume in your Library — pick a different name.`);
+    if (isNameTaken(scratchLabel, candidateProfile.files, "scratch")) {
+      setNameError(`"${scratchLabel.trim()}" is already used by another resume created from scratch — pick a different name.`);
       return;
     }
     setNameError(null);
@@ -988,8 +988,10 @@ export function ResumeBuilder({ userId, candidateProfile, onProfileChange, profi
           roleLabel={active.label}
           defaultSyncName={profileResumeName}
           // Both choices here always create a brand-new Library entry now (2026-08-20) — never a
-          // replace-in-place — so the check is against every existing file, no exclusion.
-          isNameTaken={(name) => isNameTaken(name, candidateProfile.files)}
+          // replace-in-place — so the check is against every existing file, no exclusion. Scoped to the
+          // "profile" source category (2026-08-25) — both of this modal's choices always produce a
+          // sourceRoleId-tagged instance, same as finalizeProfileResumeSave's own check.
+          isNameTaken={(name) => isNameTaken(name, candidateProfile.files, "profile")}
           onSaveToProfile={(name) => handleSyncChoice("sync", name)}
           onSaveThisOnly={(name) => handleSyncChoice("local", name)}
           onCancel={() => setSyncPromptFor(null)}
