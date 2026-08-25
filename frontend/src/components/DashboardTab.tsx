@@ -1,8 +1,13 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import type { AutoFetchConfig, AutomailConfig, CandidateProfile, SentRecord, SmtpAccount } from "@/lib/types";
+import { ExecutionLogsPanel } from "./ExecutionLogsPanel";
+
+const ACTIVITY_OPEN_KEY = "cuneihire_dashboard_activity_open";
 
 type Props = {
+  userId: string | null;
   profile: CandidateProfile;
   automail: AutomailConfig;
   onAutomailChange: (automail: AutomailConfig) => void;
@@ -24,6 +29,7 @@ type Props = {
 // daily-limit setter moved here from Settings (was an inline row there); Quick Send moved here from
 // JAMS entirely, per the same ask ("It should be moved to that page").
 export function DashboardTab({
+  userId,
   profile,
   automail,
   onAutomailChange,
@@ -48,6 +54,20 @@ export function DashboardTab({
 
   const linkedInConnected = automailLinkedInConnected(autoFetch);
   const canActivate = readyAccounts.length > 0;
+
+  // Automation Activity — moved here from JAMS (2026-08-25, operator ask). ExecutionLogsPanel is fully
+  // self-contained (only needs userId), so the move is just relocating where it's rendered.
+  const [activityOpen, setActivityOpen] = useState(false);
+  useEffect(() => {
+    setActivityOpen(typeof window !== "undefined" && localStorage.getItem(ACTIVITY_OPEN_KEY) === "1");
+  }, []);
+  function toggleActivity() {
+    setActivityOpen((prev) => {
+      const next = !prev;
+      if (typeof window !== "undefined") localStorage.setItem(ACTIVITY_OPEN_KEY, next ? "1" : "0");
+      return next;
+    });
+  }
 
   function handleLimitChange(value: number) {
     const clamped = Math.min(Math.max(1, value || 1), effectiveMaxLimit || 1);
@@ -166,6 +186,18 @@ export function DashboardTab({
               </li>
             ))}
           </ul>
+        )}
+      </div>
+
+      {/* Automation Activity — the scraper/automail run log, moved here from JAMS */}
+      <div style={{ border: "1px solid var(--line)", borderRadius: "12px", padding: "1.25rem" }}>
+        <button type="button" className="btn ghost" onClick={toggleActivity} style={{ fontSize: "0.8rem" }}>
+          {activityOpen ? "▾" : "▸"} Automation Activity
+        </button>
+        {activityOpen && userId && (
+          <div style={{ marginTop: "1rem" }}>
+            <ExecutionLogsPanel userId={userId} />
+          </div>
         )}
       </div>
     </div>

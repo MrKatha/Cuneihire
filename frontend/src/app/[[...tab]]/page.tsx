@@ -969,6 +969,7 @@ export default function Home() {
 
           {activeTab === 'dashboard' && (
             <DashboardTab
+              userId={userId}
               profile={profile}
               automail={automail}
               onAutomailChange={setAutomail}

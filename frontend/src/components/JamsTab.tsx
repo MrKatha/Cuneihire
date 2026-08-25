@@ -18,7 +18,6 @@ import {
 } from "@/lib/types";
 import { matchScoreTone, firstUrl } from "@/lib/jobPosts";
 import { StatusPill } from "./JobPostCard";
-import { ExecutionLogsPanel } from "./ExecutionLogsPanel";
 
 type Props = {
   userId: string | null;
@@ -61,8 +60,6 @@ function formatFriendlyError(errorMsg?: string) {
   return "Something went wrong while sending this email.";
 }
 
-const ACTIVITY_OPEN_KEY = "cuneihire_jams_activity_open";
-
 // The unified lifecycle hub — every contact found (scraped or manual), with matching context, sending
 // actions, and each contact's own send history all in one place. Absorbs what used to be four separate
 // tabs (Scraper & Contacts, Sending & Automail, Quick Send, Logs) — see docs/architecture.md. "Does this
@@ -103,18 +100,6 @@ export function JamsTab({
   useEffect(() => {
     setMounted(true);
   }, []);
-
-  const [activityOpen, setActivityOpen] = useState(false);
-  useEffect(() => {
-    setActivityOpen(typeof window !== "undefined" && localStorage.getItem(ACTIVITY_OPEN_KEY) === "1");
-  }, []);
-  function toggleActivity() {
-    setActivityOpen((prev) => {
-      const next = !prev;
-      if (typeof window !== "undefined") localStorage.setItem(ACTIVITY_OPEN_KEY, next ? "1" : "0");
-      return next;
-    });
-  }
 
   // Sending (ported from the old SendPanel/QuickSendTab — same backend batch mechanism)
   const [progress, setProgress] = useState({ current: 0, total: 0 });
@@ -388,17 +373,6 @@ export function JamsTab({
         {sentTodayCount >= automail.dailyLimit && (
           <div style={{ padding: "0.75rem", background: "var(--danger-light)", color: "var(--danger)", borderRadius: "6px", marginBottom: "1rem", fontSize: "0.9rem", textAlign: "center" }}>
             You have reached your daily limit of <strong>{automail.dailyLimit}</strong> emails. Sending is paused until tomorrow.
-          </div>
-        )}
-
-        <div style={{ display: "flex", gap: "0.5rem", marginBottom: "1rem", flexWrap: "wrap", alignItems: "flex-start" }}>
-          <button type="button" className="btn ghost" onClick={toggleActivity} style={{ fontSize: "0.8rem" }}>
-            {activityOpen ? "▾" : "▸"} Automation Activity
-          </button>
-        </div>
-        {activityOpen && userId && (
-          <div style={{ marginBottom: "1rem" }}>
-            <ExecutionLogsPanel userId={userId} />
           </div>
         )}
 
