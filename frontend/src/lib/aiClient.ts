@@ -18,7 +18,28 @@ function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+// Truncate a candidate-controlled free-text field before it reaches a prompt — mirrors ai.service.js's
+// same-named helper (KEEP IN SYNC). Defense against one huge paste inflating a call's cost/latency,
+// independent of whatever the UI's own maxLength enforces. 2026-08-25, operator ask.
+function truncateForPrompt(text: string, maxLen: number): string {
+  return text.length > maxLen ? `${text.slice(0, maxLen)}\n[...truncated]` : text;
+}
+
 const GEMINI_MODEL = "gemini-1.5-flash";
+
+// Rate limiting (2026-08-25, operator ask) — mirrors ai.service.js's MIN_GEMINI_INTERVAL_MS (KEEP IN
+// SYNC), but weaker here by nature: each request is its own serverless invocation, so this module-level
+// state only helps when Vercel happens to reuse a warm instance for back-to-back calls — not a guarantee.
+// The real target for this throttle is the backend's tight per-recipient/per-post loops (automail.worker.js
+// etc.); this route is always one human-triggered call at a time (Quick Send's "Generate", one resume
+// import), a much lower burst risk, so best-effort here plus the 429 backoff below is enough.
+const MIN_GEMINI_INTERVAL_MS = process.env.GEMINI_MIN_INTERVAL_MS ? parseInt(process.env.GEMINI_MIN_INTERVAL_MS, 10) : 4200;
+let lastGeminiCallAt = 0;
+async function throttleGeminiCall() {
+  const wait = lastGeminiCallAt + MIN_GEMINI_INTERVAL_MS - Date.now();
+  if (wait > 0) await sleep(wait);
+  lastGeminiCallAt = Date.now();
+}
 
 // `temperature` (2026-08-18, the AI tab) — 0-1, user-configurable, defaults to 0.4 when not passed.
 async function callAiJson(systemPrompt: string, userPrompt: string, temperature?: number): Promise<any> {
@@ -29,16 +50,27 @@ async function callAiJson(systemPrompt: string, userPrompt: string, temperature?
   const retries = 3;
 
   for (let attempt = 1; attempt <= retries; attempt++) {
+    await throttleGeminiCall();
     const baseUrl = process.env.GEMINI_API_URL || `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
-    const res = await fetch(`${baseUrl}?key=${apiKey}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        system_instruction: { parts: [{ text: systemPrompt }] },
-        contents: [{ parts: [{ text: userPrompt }] }],
-        generationConfig: { responseMimeType: "application/json", temperature: typeof temperature === "number" ? temperature : 0.4 },
-      }),
-    });
+    // 20s timeout (2026-08-25) — an AbortController since fetch has no built-in one; a hung upstream call
+    // would otherwise ride out the whole Vercel function duration instead of failing cleanly.
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 20000);
+    let res: Response;
+    try {
+      res = await fetch(`${baseUrl}?key=${apiKey}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          system_instruction: { parts: [{ text: systemPrompt }] },
+          contents: [{ parts: [{ text: userPrompt }] }],
+          generationConfig: { responseMimeType: "application/json", temperature: typeof temperature === "number" ? temperature : 0.4 },
+        }),
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timer);
+    }
     if (res.status === 429 && attempt < retries) { await sleep(delay); delay *= 2; continue; }
     if (!res.ok) throw new Error(`AI request failed (${res.status}): ${await res.text()}`);
     const data = await res.json();
@@ -155,7 +187,7 @@ CURRENT DRAFT BODY:
 ${input.draftBody?.trim() || "(empty)"}
 
 CANDIDATE INFO:
-${input.candidateInfo?.trim() || "No candidate info provided — write generically but do not invent specifics."}
+${input.candidateInfo?.trim() ? truncateForPrompt(input.candidateInfo.trim(), 4000) : "No candidate info provided — write generically but do not invent specifics."}
 
 CANDIDATE CONTACT INFO:
 ${buildCandidateContactBlock(input.profile)}

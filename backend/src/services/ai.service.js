@@ -4,6 +4,16 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+// Truncate free-text that a candidate controls directly (not the already-bounded scraped context_text,
+// see extraction.service.js's substring(0, 5000)) before it reaches a prompt — defense against one huge
+// paste inflating every future Gemini call's cost/latency for that user, independent of whatever the UI's
+// own maxLength enforces (never trust a client-side limit alone). 2026-08-25, operator ask ("other
+// API-related security stuff").
+function truncateForPrompt(text, maxLen) {
+  if (!text) return text;
+  return text.length > maxLen ? `${text.slice(0, maxLen)}\n[...truncated]` : text;
+}
+
 // The one fixed, documented variable set (see docs/architecture.md's "Template variables" section) —
 // exported so both workers import this instead of keeping their own copy (three duplicate copies of this
 // exact function caused real drift once already, see docs/memory.md). Two kinds:
@@ -80,7 +90,7 @@ function buildUserMessage(candidateInfo, contextText, baseTemplate, recipient, p
     ? `BASE TEMPLATE SUBJECT:\n${baseTemplate.subject}\n\nBASE TEMPLATE BODY:\n${baseTemplate.content}`
     : `BASE TEMPLATE:\nNone — write the email entirely in your own words.`;
   return `CANDIDATE INFO:
-${candidateInfo && candidateInfo.trim() ? candidateInfo.trim() : "No candidate info provided — write generically but do not invent specifics."}
+${candidateInfo && candidateInfo.trim() ? truncateForPrompt(candidateInfo.trim(), 4000) : "No candidate info provided — write generically but do not invent specifics."}
 
 CANDIDATE CONTACT INFO:
 ${buildCandidateContactBlock(profile)}
@@ -107,6 +117,27 @@ ${contextText || "No context provided."}`
 // (below) all go through this.
 const GEMINI_MODEL = "gemini-1.5-flash";
 
+// Rate limiting (2026-08-25, operator ask — "we need to have the API rate limiting") — every one of this
+// backend's three workers (automail, batchSend, scraper) can loop over many recipients/posts in one run,
+// each potentially calling this function; nothing previously throttled *between* those calls, so a batch
+// of N pending items fired N real Gemini requests back-to-back with zero spacing. A single in-process
+// minimum-interval gate wrapping the actual network attempt (below) is the one choke point every call site
+// goes through, so it protects all three workers without duplicating logic in each. Deliberately placed
+// AFTER the missing-key check — that's a local, zero-cost fail (never reaches Gemini, so it doesn't burn
+// any real quota), and throttling it too would just add dead latency for every pending item with no
+// protective benefit. Conservative default (safely under Gemini 1.5 Flash's free-tier 15 RPM even with
+// zero other traffic) since the actual billing tier isn't confirmed — override via GEMINI_MIN_INTERVAL_MS
+// once it is. This only throttles within this one Node process; it does not coordinate with the frontend's
+// own copy in aiClient.ts (a separate, serverless process) — the existing 429 backoff below is the safety
+// net for that residual overlap.
+const MIN_GEMINI_INTERVAL_MS = process.env.GEMINI_MIN_INTERVAL_MS ? parseInt(process.env.GEMINI_MIN_INTERVAL_MS, 10) : 4200;
+let lastGeminiCallAt = 0;
+async function throttleGeminiCall() {
+  const wait = lastGeminiCallAt + MIN_GEMINI_INTERVAL_MS - Date.now();
+  if (wait > 0) await sleep(wait);
+  lastGeminiCallAt = Date.now();
+}
+
 // `temperature` (2026-08-18, the AI tab) — 0-1, user-configurable, defaults to 0.4 if not passed (a
 // caller that hasn't been updated yet, or an undefined app_state row for a brand-new user).
 async function callAiJson(systemPrompt, userPrompt, temperature) {
@@ -117,14 +148,18 @@ async function callAiJson(systemPrompt, userPrompt, temperature) {
   let delay = 2000;
 
   for (let attempt = 1; attempt <= retries; attempt++) {
+    await throttleGeminiCall();
     try {
       const baseUrl = process.env.GEMINI_API_URL || `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
       const url = `${baseUrl}?key=${apiKey}`;
+      // 20s timeout (2026-08-25) — this runs inside a `for (const user of users)` loop across every
+      // automated user in one process (automail.worker.js/scraper.worker.js); an unbounded hang on one
+      // user's Gemini call would otherwise stall every other user's automation behind it too.
       const res = await axios.post(url, {
         system_instruction: { parts: [{ text: systemPrompt }] },
         contents: [{ parts: [{ text: userPrompt }] }],
         generationConfig: { responseMimeType: "application/json", temperature: typeof temperature === "number" ? temperature : 0.4 }
-      });
+      }, { timeout: 20000 });
       return JSON.parse(res.data.candidates[0].content.parts[0].text);
     } catch (error) {
       if (error.response && error.response.status === 429 && attempt < retries) {

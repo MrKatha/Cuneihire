@@ -190,10 +190,12 @@ export function ProfileTab({ profile, onProfileChange, automail, onAutomailChang
           </span>
           <textarea
             rows={5}
+            maxLength={4000}
             placeholder="Full-stack developer with 4 years in React, Node.js, and PostgreSQL. Looking for remote roles."
             value={automail.candidateInfo}
             onChange={(e) => onAutomailChange({ ...automail, candidateInfo: e.target.value })}
           />
+          <span className="hint compact">{automail.candidateInfo.length}/4000 — a short blurb works best; every AI email re-reads this.</span>
         </label>
 
         <p className="hint compact" style={{ marginTop: "0.75rem" }}>
