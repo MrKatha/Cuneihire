@@ -758,3 +758,13 @@ alter table public.automailsend_app_state
 
 alter table public.automailsend_app_state
   add column if not exists min_fetch_interval_override integer;
+
+-- 2026-08-25 (operator ask — real AI-based job-post filtering, not pure keyword matching): a role's
+-- keyword list splits into "Include Keywords" (the pre-existing `keywords` column — still what's searched
+-- in LinkedIn's own search bar) and a new "Exclude Keywords" list, plus a free-text `ai_instructions` field
+-- that's read directly by the AI matcher (ai.service.js's scoreJobMatch) and takes priority over both
+-- keyword lists when they conflict. Both default to "nothing set" so every existing role's behavior is
+-- unchanged until a candidate fills them in. See RoleDef in lib/types.ts.
+alter table public.automailsend_role_defs
+  add column if not exists exclude_keywords text[] default '{}',
+  add column if not exists ai_instructions text default '';

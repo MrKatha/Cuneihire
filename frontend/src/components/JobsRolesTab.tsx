@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import toast from "react-hot-toast";
 import {
   AVAILABILITY_OPTIONS,
@@ -21,12 +21,9 @@ import {
   type VisaSponsorship,
   type WorkMode,
 } from "@/lib/types";
-import { groupRecipientsByJobPost } from "@/lib/jobPosts";
-import { JobPostCard } from "./JobPostCard";
 import { AddProfileItemModal, type AddableSection } from "./AddProfileItemModal";
 
 const MAX_CHIPS = 15;
-const STRICTNESS_KEY = "cuneihire_match_min_score";
 
 type ModuleKey = "experience" | "education" | "projects" | "certifications" | "skills";
 
@@ -47,7 +44,6 @@ type Props = {
   onRenameRole: (id: string, newLabel: string) => void;
   onDeleteRole: (id: string) => void;
   onUpdateRoleRules: (id: string, patch: Partial<RoleDef>) => void;
-  onUpdateStatus?: (id: string, field: "status" | "phone_status", newStatus: string) => Promise<void>;
   // Admin-set plan override (2026-08-25) — caps TOTAL keywords across every role combined, on top of the
   // pre-existing per-role MAX_CHIPS cap below. null = no override, unlimited (today's behavior).
   maxKeywords: number | null;
@@ -252,27 +248,15 @@ export function JobsRolesTab({
   onRenameRole,
   onDeleteRole,
   onUpdateRoleRules,
-  onUpdateStatus,
   maxKeywords,
 }: Props) {
   const [showAddRole, setShowAddRole] = useState(false);
   const [newRoleLabel, setNewRoleLabel] = useState("");
-  const [minScore, setMinScore] = useState(0);
   const [addingSection, setAddingSection] = useState<AddableSection | null>(null);
   // Which of the five module checklists is open — accordion, not five independent toggles (2026-08-20).
   const [expandedModule, setExpandedModule] = useState<ModuleKey | null>(null);
   function toggleExpanded(key: ModuleKey) {
     setExpandedModule((cur) => (cur === key ? null : key));
-  }
-
-  useEffect(() => {
-    const saved = typeof window !== "undefined" ? window.localStorage.getItem(STRICTNESS_KEY) : null;
-    if (saved !== null) setMinScore(Number(saved) || 0);
-  }, []);
-
-  function handleMinScoreChange(v: number) {
-    setMinScore(v);
-    if (typeof window !== "undefined") window.localStorage.setItem(STRICTNESS_KEY, String(v));
   }
 
   const counts = useMemo(() => {
@@ -282,22 +266,6 @@ export function JobsRolesTab({
   }, [recipients]);
 
   const active = roleDefs.find((d) => d.key === activeRole) || roleDefs[0];
-
-  // Matching happens before you'd ever reach out — it's a "does this fit what I'm looking for" check
-  // against this role's own criteria, so it lives here with the criteria, not in the outreach tracker
-  // (JamsTab). See docs/memory.md.
-  const { matchedPosts, hiddenByStrictness } = useMemo(() => {
-    if (!active) return { matchedPosts: [], hiddenByStrictness: 0 };
-    const forRole = groupRecipientsByJobPost(recipients).filter((g) => g.role === active.key);
-    const visible = forRole.filter((g) => g.matchScore === null || g.matchScore >= minScore);
-    visible.sort((a, b) => {
-      if (a.matchScore === null && b.matchScore === null) return (b.scrapedAt || "").localeCompare(a.scrapedAt || "");
-      if (a.matchScore === null) return 1;
-      if (b.matchScore === null) return -1;
-      return b.matchScore - a.matchScore;
-    });
-    return { matchedPosts: visible, hiddenByStrictness: forRole.length - visible.length };
-  }, [recipients, active, minScore]);
 
   type SelectionField = "selectedExperienceIds" | "selectedEducationIds" | "selectedProjectIds" | "selectedCertificationIds" | "selectedSkillIds";
   function toggleModule(field: SelectionField, id: string) {
@@ -450,18 +418,53 @@ export function JobsRolesTab({
           </div>
 
           <ChipListField
-            label="Search keywords / aliases"
+            label="Include keywords"
             placeholder="e.g. automation engineer"
             values={active.keywords}
             emptyHint="No keywords yet — this role won't be searched until you add at least one."
             onAdd={handleAddKeyword}
             onRemove={(v) => onUpdateRoleRules(active.id, { keywords: active.keywords.filter((k) => k !== v) })}
           />
+          <p className="hint compact" style={{ marginTop: "-0.3rem" }}>
+            What&apos;s actually searched on LinkedIn — one search per keyword/alias. Add every way this role
+            gets titled (e.g. both &quot;automation engineer&quot; and &quot;automation specialist&quot;), since
+            LinkedIn only returns posts that use the exact words searched.
+          </p>
           {maxKeywords != null && (
             <p className="hint compact" style={{ marginTop: "-0.3rem", color: atKeywordCap ? "var(--danger)" : undefined }}>
               {totalKeywords} / {maxKeywords} keywords used across all roles{atKeywordCap ? " — limit reached" : ""}
             </p>
           )}
+
+          <div style={{ marginTop: "0.75rem" }}>
+            <ChipListField
+              label="Exclude keywords"
+              placeholder="e.g. unpaid internship"
+              values={active.excludeKeywords}
+              emptyHint="Nothing excluded — every post found gets scored on its own merits."
+              onAdd={(v) => onUpdateRoleRules(active.id, { excludeKeywords: [...active.excludeKeywords, v] })}
+              onRemove={(v) => onUpdateRoleRules(active.id, { excludeKeywords: active.excludeKeywords.filter((k) => k !== v) })}
+            />
+            <p className="hint compact" style={{ marginTop: "-0.3rem" }}>
+              Not a search term — read by the AI when it scores a scraped post. A post genuinely about one
+              of these gets scored low even though it matched an Include keyword.
+            </p>
+          </div>
+
+          <label className="field stretch" style={{ marginTop: "0.75rem" }}>
+            <span>AI matching instructions</span>
+            <textarea
+              rows={3}
+              value={active.aiInstructions}
+              onChange={(e) => onUpdateRoleRules(active.id, { aiInstructions: e.target.value })}
+              placeholder={'e.g. "Only match low-code/no-code roles" or "exclude anything mentioning unpaid internships"'}
+            />
+            <p className="hint compact" style={{ margin: "0.3rem 0 0" }}>
+              This prompt is sent straight to the AI that filters and scores scraped posts for this role —
+              it overrides your keyword lists above when they conflict, so a specific instruction here always
+              wins.
+            </p>
+          </label>
 
           <div className="grid-2" style={{ marginTop: "1rem" }}>
             <label className="field">
@@ -653,38 +656,6 @@ export function JobsRolesTab({
             existingSkillNames={profile.skills.map((s) => s.name)}
           />
         )}
-
-        <div style={{ marginTop: "1.25rem" }}>
-          <div className="panel-head" style={{ marginBottom: "0.35rem" }}>
-            <h2 style={{ fontSize: "0.82rem" }}>Matched job posts</h2>
-            <span className="hint compact">Scraped posts checked against {active.label}&apos;s criteria above</span>
-          </div>
-          <label className="field" style={{ maxWidth: "360px", marginBottom: "0.5rem" }}>
-            <span>Match strictness — hide anything scored below {minScore}</span>
-            <input
-              type="range"
-              min={0}
-              max={100}
-              step={5}
-              value={minScore}
-              onChange={(e) => handleMinScoreChange(Number(e.target.value))}
-            />
-          </label>
-          {hiddenByStrictness > 0 && (
-            <p className="hint" style={{ margin: "0 0 0.5rem" }}>{hiddenByStrictness} post(s) hidden below the strictness threshold.</p>
-          )}
-          {matchedPosts.length === 0 ? (
-            <p className="hint" style={{ margin: 0 }}>
-              No scraped posts for this role yet — turn on AutoFetch, or lower the strictness slider.
-            </p>
-          ) : (
-            <div className="templates">
-              {matchedPosts.map((g) => (
-                <JobPostCard key={g.jobPostId} group={g} roleDefs={roleDefs} onUpdateStatus={onUpdateStatus} showRole={false} />
-              ))}
-            </div>
-          )}
-        </div>
       </div>
     </section>
   );

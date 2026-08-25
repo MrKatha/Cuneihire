@@ -231,16 +231,26 @@ async function chooseTemplateForJob(templates, roleLabel, contextText, temperatu
 // bounded, best-effort free-text snippet, not a parsed listing — so "matching a role's rules" has to be an
 // AI read of that text judged against the role's structured criteria, not a SQL comparison. See
 // docs/memory.md and docs/architecture.md's "Job matching" section.
-const JOB_MATCH_SYSTEM_PROMPT = `You judge how well a scraped LinkedIn post matches a candidate's job-search criteria. Your only output is a single JSON object — no markdown, no commentary.
+// Extended 2026-08-25 (operator ask) — the candidate's own search keywords are a blunt instrument on
+// their own ("someone calls it specialization, someone calls it engineer"), so the real filter is this AI
+// read of the post's actual text against three layers, checked in priority order:
+//  1. AI INSTRUCTIONS (candidate's own free text, e.g. "only match low-code/no-code roles") — highest
+//     priority, overrides both layers below when it conflicts with either.
+//  2. EXCLUDE KEYWORDS/TOPICS — score low when the post is genuinely about one of these, even though it
+//     surfaced from an Include Keyword search.
+//  3. CANDIDATE'S CRITERIA — the structured work-mode/salary/etc. fields, unchanged from before.
+const JOB_MATCH_SYSTEM_PROMPT = `You judge how well a scraped LinkedIn post matches a candidate's job-search criteria, and whether it should be filtered out entirely. Your only output is a single JSON object — no markdown, no commentary.
 
-You will be given:
-- JOB POST — raw scraped text of a LinkedIn post. It is an unstructured social-media snippet, NOT a structured job listing — it may be incomplete, noisy, or simply not mention some criteria at all.
+You will be given, in priority order (a higher one overrides a lower one when they conflict):
+- AI INSTRUCTIONS (optional) — free-text instructions written by the candidate themselves. Highest priority of everything below — if these conflict with EXCLUDE KEYWORDS/TOPICS or CANDIDATE'S CRITERIA, follow AI INSTRUCTIONS.
+- EXCLUDE KEYWORDS/TOPICS (optional) — if JOB POST is genuinely about any of these (not just a coincidental word overlap), score it low (0-15) and say which one drove it, unless AI INSTRUCTIONS overrides that.
 - CANDIDATE'S CRITERIA — only the specific things the candidate actually set for this role. Anything not listed means the candidate has no preference on it.
+- JOB POST — raw scraped text of a LinkedIn post. It is an unstructured social-media snippet, NOT a structured job listing — it may be incomplete, noisy, or simply not mention some criteria at all. Job titles vary a lot in how people phrase them (e.g. "automation specialist" vs "automation engineer") — judge the actual role being described, not just literal keyword overlap.
 
-Score how well JOB POST fits CANDIDATE'S CRITERIA on a 0-100 scale:
+Score how well JOB POST fits, on a 0-100 scale:
 - Score high only when the post's own text actually supports a match — never assume a criterion is satisfied just because the post doesn't contradict it. If the post is silent on a criterion, treat it as neutral/unknown, not a pass or a fail.
-- Score low when the post's text actively conflicts with a criterion (e.g. explicitly on-site when the candidate wants remote-only, or a stated salary clearly below the candidate's minimum).
-- If JOB POST has barely any signal at all (too short, unrelated, or clearly not a real opportunity), score low and say so.
+- Score low when the post's text actively conflicts with CANDIDATE'S CRITERIA (e.g. explicitly on-site when the candidate wants remote-only, or a stated salary clearly below the candidate's minimum).
+- If JOB POST has barely any signal at all (too short, unrelated, or clearly not a real job opportunity), score low and say so.
 
 Output ONLY this JSON shape: {"score": <integer 0-100>, "reasoning": "<one short sentence, under 160 characters, citing the specific thing(s) that drove the score>"}`;
 
@@ -267,21 +277,45 @@ function buildRoleCriteriaBlock(role) {
   return lines.length > 0 ? lines.join("\n") : null;
 }
 
-// Returns { score: 0-100, reasoning: string } or null when there's nothing to score (no real criteria set
-// on the role) or the AI response didn't come back in the expected shape — callers should treat null as
-// "leave match_score unset", never as a 0.
+// The two new filtering signals (2026-08-25) — kept as their own small builders, separate from
+// buildRoleCriteriaBlock above, since they're read by the prompt as distinct, higher-priority blocks
+// rather than more structured "criteria." Both return null when unset, same "nothing to say" convention.
+function buildExcludeKeywordsBlock(role) {
+  const r = role || {};
+  if (!Array.isArray(r.exclude_keywords) || r.exclude_keywords.length === 0) return null;
+  return r.exclude_keywords.join(", ");
+}
+function buildAiInstructionsBlock(role) {
+  const r = role || {};
+  if (!r.ai_instructions || !r.ai_instructions.trim()) return null;
+  // Same truncation guard as candidateInfo elsewhere in this file — this is candidate-controlled free
+  // text, not a bounded scraped value.
+  return truncateForPrompt(r.ai_instructions.trim(), 1000);
+}
+
+// Returns { score: 0-100, reasoning: string } or null when there's nothing to score at all (no structured
+// criteria, no exclude keywords, no AI instructions) or the AI response didn't come back in the expected
+// shape — callers should treat null as "leave match_score unset", never as a 0.
 async function scoreJobMatch(contextText, sourceUrl, role, temperature) {
   const criteria = buildRoleCriteriaBlock(role);
-  if (!criteria) return null;
+  const excludeKeywords = buildExcludeKeywordsBlock(role);
+  const aiInstructions = buildAiInstructionsBlock(role);
+  if (!criteria && !excludeKeywords && !aiInstructions) return null;
 
   const prompt = `JOB POST:
 ${contextText && contextText.trim() ? contextText.trim() : "No text was captured for this post."}${sourceUrl ? `
 
 SOURCE URL:
 ${sourceUrl}` : ""}
+${aiInstructions ? `
+AI INSTRUCTIONS (from the candidate, highest priority):
+${aiInstructions}` : ""}
+${excludeKeywords ? `
+EXCLUDE KEYWORDS/TOPICS:
+${excludeKeywords}` : ""}
 
 CANDIDATE'S CRITERIA:
-${criteria}`;
+${criteria || "None set."}`;
 
   const result = await callAiJson(JOB_MATCH_SYSTEM_PROMPT, prompt, temperature);
   if (!result || typeof result.score !== "number" || Number.isNaN(result.score)) return null;

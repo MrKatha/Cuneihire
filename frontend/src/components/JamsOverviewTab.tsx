@@ -14,7 +14,6 @@ import {
 type Props = {
   profile: CandidateProfile;
   automail: AutomailConfig;
-  onAutomailChange: (automail: AutomailConfig) => void;
   smtpAccounts: SmtpAccount[];
   sentTodayCount: number;
   globalMaxDailyLimit: number;
@@ -37,14 +36,15 @@ function StatTile({ label, value, sub }: { label: string; value: React.ReactNode
 
 // The candidate's "what's working" snapshot (2026-08-25, operator ask — "one tab is for the like stats,
 // metrics, analytics, overall things that are working"), replacing the old standalone Dashboard tab as
-// JAMS's landing sub-tab. The automation on/off toggle stays here, not in Settings ("the toggle for the
-// automation should obviously be in our dashboard" — operator, same day) — everything else that felt like
-// a setting (SMTP/LinkedIn connect, who writes an email, account) moved to SettingsTab.tsx. Quick Send is
-// the other action that stays here (moved from the old Dashboard, same reasoning — an action, not config).
+// JAMS's landing sub-tab. Read-only — the automation on/off toggle itself moved to Settings the next day
+// (2026-08-26, operator ask — "just have a quick toggle button for the setting, like play or pause...
+// forget about the whole section and just move the button to the settings"), so this page no longer edits
+// `automail` at all; the "Sent today" tile below still shows Active/Paused as context. Everything that felt
+// like a setting (SMTP/LinkedIn connect, who writes an email, account) already lived in SettingsTab.tsx.
+// Quick Send is the one action that stays here (moved from the old Dashboard) — an action, not config.
 export function JamsOverviewTab({
   profile,
   automail,
-  onAutomailChange,
   smtpAccounts,
   sentTodayCount,
   globalMaxDailyLimit,
@@ -57,17 +57,9 @@ export function JamsOverviewTab({
   const readyAccounts = smtpAccounts.filter((a) => a.isVerified && a.isActive);
   // "There will be a limit either by the plan or by the connected SMTP" (operator ask) — the smaller of
   // the admin's account-wide ceiling and what the connected mailboxes can physically send (50/day each,
-  // Gmail's own real default — see SmtpConfigPanel.tsx).
+  // Gmail's own real default — see SmtpConfigPanel.tsx). Still used by the "Sent today" tile below.
   const smtpCeiling = readyAccounts.length * 50;
   const effectiveMaxLimit = Math.max(0, Math.min(globalMaxDailyLimit, smtpCeiling));
-  const limitedBy = globalMaxDailyLimit <= smtpCeiling ? "plan" : "connected SMTP accounts";
-  const canActivate = readyAccounts.length > 0;
-  const progressPct = effectiveMaxLimit > 0 ? Math.min(100, Math.round((sentTodayCount / effectiveMaxLimit) * 100)) : 0;
-
-  function handleLimitChange(value: number) {
-    const clamped = Math.min(Math.max(1, value || 1), effectiveMaxLimit || 1);
-    onAutomailChange({ ...automail, dailyLimit: clamped });
-  }
 
   const totalSent = useMemo(() => recipients.filter((r) => (r.status || "pending") === "sent").length, [recipients]);
   const totalReplied = useMemo(() => recipients.filter((r) => r.hasReplied).length, [recipients]);
@@ -116,54 +108,6 @@ export function JamsOverviewTab({
         <StatTile label="Total sent" value={totalSent} />
         <StatTile label="Replies" value={totalReplied} sub={totalSent > 0 ? `${replyRatePct}% reply rate` : undefined} />
         <StatTile label="AI credits" value={aiCredits} sub="remaining" />
-      </div>
-
-      {/* Automation — the one control that stays on this page rather than Settings. */}
-      <div style={{ border: "1px solid var(--line)", borderRadius: "12px", padding: "1.25rem" }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "0.75rem" }}>
-          <h3 style={{ margin: 0, fontSize: "1rem" }}>Automation</h3>
-          <span className={automail.enabled ? "badge ok" : "badge warn"}>{automail.enabled ? "Active" : "Inactive"}</span>
-        </div>
-
-        <label style={{ display: "flex", alignItems: "center", gap: "0.6rem", marginBottom: "1rem" }}>
-          <input
-            type="checkbox"
-            checked={automail.enabled}
-            disabled={!canActivate}
-            onChange={(e) => onAutomailChange({ ...automail, enabled: e.target.checked })}
-            style={{ width: "1.2rem", height: "1.2rem" }}
-          />
-          <span style={{ fontSize: "0.9rem" }}>{automail.enabled ? "Sending automatically" : "Paused — turn on to start sending"}</span>
-        </label>
-        {!canActivate && (
-          <p className="hint compact" style={{ color: "var(--danger)", marginTop: "-0.5rem", marginBottom: "0.75rem" }}>
-            Connect an SMTP account on the Settings tab first.
-          </p>
-        )}
-
-        <div style={{ marginBottom: "0.5rem" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.85rem", marginBottom: "0.3rem" }}>
-            <span>Sent today: {sentTodayCount} / {effectiveMaxLimit}</span>
-            <span className="hint compact">Limited by {limitedBy}</span>
-          </div>
-          <div style={{ height: "8px", borderRadius: "999px", background: "var(--bg-elevated)", overflow: "hidden" }}>
-            <div style={{ height: "100%", width: `${progressPct}%`, background: "var(--accent)", transition: "width 0.3s" }} />
-          </div>
-        </div>
-
-        <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", fontSize: "0.85rem", marginTop: "0.75rem" }}>
-          Daily limit
-          <input
-            type="number"
-            min={1}
-            max={effectiveMaxLimit || 1}
-            value={automail.dailyLimit}
-            disabled={effectiveMaxLimit === 0}
-            onChange={(e) => handleLimitChange(Number(e.target.value))}
-            style={{ width: "70px" }}
-          />
-          <span className="hint compact">(max {effectiveMaxLimit}/day)</span>
-        </label>
       </div>
 
       <div style={{ border: "1px solid var(--line)", borderRadius: "12px", padding: "1.25rem" }}>

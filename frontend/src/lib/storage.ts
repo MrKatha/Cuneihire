@@ -324,6 +324,7 @@ function mapRoleDefRow(d: any): RoleDef {
     key: d.key,
     label: d.label,
     keywords: d.keywords || [],
+    excludeKeywords: d.exclude_keywords || [],
     workMode: (d.work_mode as RoleDef["workMode"]) || "any",
     salaryCurrency: d.salary_currency || "USD",
     salaryPeriod: (d.salary_period as RoleDef["salaryPeriod"]) || "annual",
@@ -335,6 +336,7 @@ function mapRoleDefRow(d: any): RoleDef {
     visaSponsorship: (d.visa_sponsorship as RoleDef["visaSponsorship"]) || "any",
     availability: (d.availability as RoleDef["availability"]) || "",
     otherNotes: d.other_notes || "",
+    aiInstructions: d.ai_instructions || "",
     selectedExperienceIds: d.selected_experience_ids || [],
     selectedEducationIds: d.selected_education_ids || [],
     selectedProjectIds: d.selected_project_ids || [],
@@ -385,6 +387,7 @@ export async function saveRoleDef(
     // partial call) never blanks out keywords/rules the caller didn't mean to change.
     const payload: Record<string, unknown> = { key: def.key, label: def.label };
     if (def.keywords !== undefined) payload.keywords = def.keywords;
+    if (def.excludeKeywords !== undefined) payload.exclude_keywords = def.excludeKeywords;
     if (def.workMode !== undefined) payload.work_mode = def.workMode;
     if (def.salaryCurrency !== undefined) payload.salary_currency = def.salaryCurrency;
     if (def.salaryPeriod !== undefined) payload.salary_period = def.salaryPeriod;
@@ -396,6 +399,7 @@ export async function saveRoleDef(
     if (def.visaSponsorship !== undefined) payload.visa_sponsorship = def.visaSponsorship;
     if (def.availability !== undefined) payload.availability = def.availability;
     if (def.otherNotes !== undefined) payload.other_notes = def.otherNotes;
+    if (def.aiInstructions !== undefined) payload.ai_instructions = def.aiInstructions;
     if (def.selectedExperienceIds !== undefined) payload.selected_experience_ids = def.selectedExperienceIds;
     if (def.selectedEducationIds !== undefined) payload.selected_education_ids = def.selectedEducationIds;
     if (def.selectedProjectIds !== undefined) payload.selected_project_ids = def.selectedProjectIds;
@@ -424,6 +428,7 @@ export async function saveRoleDef(
       key: def.key,
       label: def.label,
       keywords: def.keywords ?? [],
+      exclude_keywords: def.excludeKeywords ?? [],
       work_mode: def.workMode ?? "any",
       salary_currency: def.salaryCurrency ?? "USD",
       salary_period: def.salaryPeriod ?? "annual",
@@ -435,6 +440,7 @@ export async function saveRoleDef(
       visa_sponsorship: def.visaSponsorship ?? "any",
       availability: def.availability ?? "",
       other_notes: def.otherNotes ?? "",
+      ai_instructions: def.aiInstructions ?? "",
       // Defaults to "everything selected" is the caller's job (it's the one holding the candidate's
       // current profile item ids at role-creation time — see page.tsx's handleAddRole) — this just
       // respects whatever's passed, empty if nothing was.

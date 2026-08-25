@@ -4,6 +4,7 @@ import { EmailConfigTab } from "./EmailConfigTab";
 import {
   autoFetchLinkedInConnected,
   type AutoFetchConfig,
+  type AutomailConfig,
   type CandidateProfile,
   type Recipient,
   type Role,
@@ -13,6 +14,16 @@ import {
 } from "@/lib/types";
 
 type Props = {
+  // Automation play/pause (2026-08-26, operator ask — "move the automation section from JAMS to the
+  // settings. Just have a quick toggle button... if I click play it plays and if I click pause it
+  // pauses. Forget about the whole section and just move the button to the settings") — replaces the
+  // full card (checkbox + progress bar + editable daily limit) that used to live on JAMS's Overview
+  // sub-tab with a single toggle. Daily-limit editing was dropped along with the rest of that section;
+  // the limit itself is still shown, read-only, as context next to the toggle.
+  automail: AutomailConfig;
+  onAutomailChange: (automail: AutomailConfig) => void;
+  sentTodayCount: number;
+  globalMaxDailyLimit: number;
   smtpAccounts: SmtpAccount[];
   autoFetch: AutoFetchConfig;
   onOpenSmtp: () => void;
@@ -54,10 +65,13 @@ function Card({ title, action, children }: { title: string; action?: React.React
 // account section where you can see our SMTPs. When I click on Add it will give me the same pop-up as we
 // have right now. Same goes for LinkedIn"). Not tabbed — Dashboard/JamsOverviewTab.tsx isn't either, it's
 // one page of cards, so this matches that same visual language directly rather than adding its own nav.
-// Automation on/off + daily limit live on JamsOverviewTab instead of here ("the toggle for the automation
-// should obviously be in our dashboard" — operator, earlier the same day) — this page is purely
-// SMTP/LinkedIn/email-authorship/resume-pointer/account, nothing that starts or stops sending.
+// Automation moved here 2026-08-26 (see the play/pause Card below) — everything else was already
+// SMTP/LinkedIn/email-authorship/resume-pointer/account.
 export function SettingsTab({
+  automail,
+  onAutomailChange,
+  sentTodayCount,
+  globalMaxDailyLimit,
   smtpAccounts,
   autoFetch,
   onOpenSmtp,
@@ -78,10 +92,36 @@ export function SettingsTab({
   const readyAccounts = smtpAccounts.filter((a) => a.isVerified && a.isActive);
   const linkedInConnected = autoFetchLinkedInConnected(autoFetch);
   const defaultResume = profile.files.find((f) => f.id === profile.globalResumeId) || null;
+  const canActivate = readyAccounts.length > 0;
+  // Same "smaller of plan vs. connected SMTP" ceiling JamsOverviewTab's stat tile shows — kept here too
+  // so the read-only "sent today" line means the same 40 it always did.
+  const effectiveMaxLimit = Math.max(0, Math.min(globalMaxDailyLimit, readyAccounts.length * 50));
 
   return (
     <div className="panel flex-col gap-4">
       <h2 className="panel-title">Settings</h2>
+
+      <Card
+        title="Automation"
+        action={<span className={automail.enabled ? "badge ok" : "badge warn"}>{automail.enabled ? "Active" : "Paused"}</span>}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", flexWrap: "wrap" }}>
+          <button
+            type="button"
+            className="btn primary"
+            disabled={!canActivate}
+            onClick={() => onAutomailChange({ ...automail, enabled: !automail.enabled })}
+          >
+            {automail.enabled ? "⏸ Pause" : "▶ Play"}
+          </button>
+          <span className="hint compact">Sent today: {sentTodayCount} / {effectiveMaxLimit}</span>
+        </div>
+        {!canActivate && (
+          <p className="hint compact" style={{ color: "var(--danger)", marginTop: "0.5rem", marginBottom: 0 }}>
+            Connect an SMTP account below first.
+          </p>
+        )}
+      </Card>
 
       <Card
         title="SMTP Accounts"

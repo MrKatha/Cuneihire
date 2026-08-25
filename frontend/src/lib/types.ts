@@ -57,7 +57,16 @@ export type RoleDef = {
   id: string;
   key: string;
   label: string;
+  // "Include Keywords" (2026-08-25 label — same field as always). What actually gets searched in
+  // LinkedIn's own search bar, one query per keyword (backend/src/workers/scraper.worker.js). Also read
+  // by the AI as positive signal when scoring a scraped post — see ai.service.js's scoreJobMatch.
   keywords: string[];
+  // "Exclude Keywords" (2026-08-25, operator ask — "the keywords that I do not want inside the job").
+  // Never used to build a LinkedIn search query (there's no "exclude" search operator in play here) — this
+  // is purely an AI-filtering signal: scoreJobMatch scores a post low when its own text is genuinely about
+  // one of these, even though the post surfaced from an Include Keyword search. Existing rows default to
+  // an empty list (nothing excluded), unchanged behavior.
+  excludeKeywords: string[];
   workMode: WorkMode;
   salaryCurrency: string;
   salaryPeriod: SalaryPeriod;
@@ -71,6 +80,13 @@ export type RoleDef = {
   visaSponsorship: VisaSponsorship;
   availability: AvailabilityOption;
   otherNotes: string;
+  // "This prompt is for AI" (2026-08-25, operator ask) — free text read directly by scoreJobMatch's
+  // prompt, e.g. "Only match low-code/no-code roles" or "exclude unpaid internships even if the keywords
+  // otherwise match." Takes priority over both the structured criteria above and Exclude Keywords when
+  // they conflict — see ai.service.js's JOB_MATCH_SYSTEM_PROMPT. Distinct from `otherNotes`, which is
+  // never sent to the AI matcher (resume/email context only) — this field exists specifically so it's
+  // unambiguous which box actually reaches the model.
+  aiInstructions: string;
   selectedExperienceIds: string[];
   selectedEducationIds: string[];
   selectedProjectIds: string[];

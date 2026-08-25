@@ -11,7 +11,10 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 // A role is worth scoring against if it has any real criteria set — an all-'any'/empty role has nothing
 // for the AI to check, so posts found for it just stay unscored (shown in JAMS as "no criteria set", never
-// a fake 0). Mirrors ai.service.js's buildRoleCriteriaBlock field-by-field.
+// a fake 0). Mirrors ai.service.js's buildRoleCriteriaBlock/buildExcludeKeywordsBlock/
+// buildAiInstructionsBlock field-by-field — a role with only exclude keywords or AI instructions set (and
+// every structured field left "any") still needs scoring, since those two are themselves real filtering
+// criteria (2026-08-25).
 function roleHasCriteria(role) {
   if (!role) return false;
   return Boolean(
@@ -21,7 +24,9 @@ function roleHasCriteria(role) {
     (role.visa_sponsorship && role.visa_sponsorship !== "any") ||
     role.salary_min != null ||
     role.salary_max != null ||
-    (Array.isArray(role.preferred_locations) && role.preferred_locations.length > 0)
+    (Array.isArray(role.preferred_locations) && role.preferred_locations.length > 0) ||
+    (Array.isArray(role.exclude_keywords) && role.exclude_keywords.length > 0) ||
+    (role.ai_instructions && role.ai_instructions.trim())
   );
 }
 

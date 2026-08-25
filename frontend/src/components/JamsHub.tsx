@@ -23,7 +23,6 @@ type Props = {
   userId: string | null;
   profile: CandidateProfile;
   automail: AutomailConfig;
-  onAutomailChange: (automail: AutomailConfig) => void;
   smtpAccounts: SmtpAccount[];
   sentTodayCount: number;
   globalMaxDailyLimit: number;
@@ -53,7 +52,6 @@ export function JamsHub({
   userId,
   profile,
   automail,
-  onAutomailChange,
   smtpAccounts,
   sentTodayCount,
   globalMaxDailyLimit,
@@ -99,7 +97,6 @@ export function JamsHub({
           <JamsOverviewTab
             profile={profile}
             automail={automail}
-            onAutomailChange={onAutomailChange}
             smtpAccounts={smtpAccounts}
             sentTodayCount={sentTodayCount}
             globalMaxDailyLimit={globalMaxDailyLimit}

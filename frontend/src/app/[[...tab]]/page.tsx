@@ -956,7 +956,6 @@ export default function Home() {
               onRenameRole={handleRenameRole}
               onDeleteRole={handleDeleteRole}
               onUpdateRoleRules={handleUpdateRoleRules}
-              onUpdateStatus={handleUpdateRecipientStatus}
               maxKeywords={maxKeywords}
             />
           )}
@@ -977,7 +976,6 @@ export default function Home() {
               userId={userId}
               profile={profile}
               automail={automail}
-              onAutomailChange={setAutomail}
               smtpAccounts={smtpAccounts}
               sentTodayCount={sentTodayCount}
               globalMaxDailyLimit={globalMaxDailyLimit}
@@ -1103,6 +1101,10 @@ export default function Home() {
 
           {activeTab === 'settings' && (
             <SettingsTab
+              automail={automail}
+              onAutomailChange={setAutomail}
+              sentTodayCount={sentTodayCount}
+              globalMaxDailyLimit={globalMaxDailyLimit}
               smtpAccounts={smtpAccounts}
               autoFetch={autoFetch}
               onOpenSmtp={() => setShowSmtpModal(true)}
