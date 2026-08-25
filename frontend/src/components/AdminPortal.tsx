@@ -9,6 +9,11 @@ type UserState = {
   config: any;
   auto_fetch: any;
   automail: any;
+  // Platform-managed AI credits (2026-08-18) — admin-granted only, no self-serve purchase yet.
+  ai_credits: number;
+  // Recruiter portal (2026-08-19) — null means this user hasn't activated recruiter mode, distinct from
+  // a recruiter with 0 credits. See automailsend_recruiter_profiles.
+  ats_ai_credits: number | null;
   created_at: string;
 };
 
@@ -204,6 +209,8 @@ export function AdminPortal() {
                   <th style={{ padding: "0.75rem 0.5rem" }}>User ID</th>
                   <th style={{ padding: "0.75rem 0.5rem" }}>Joined</th>
                   <th style={{ padding: "0.75rem 0.5rem" }}>Status</th>
+                  <th style={{ padding: "0.75rem 0.5rem" }}>AI Credits</th>
+                  <th style={{ padding: "0.75rem 0.5rem" }}>ATS Credits</th>
                   <th style={{ padding: "0.75rem 0.5rem" }}>Actions</th>
                 </tr>
               </thead>
@@ -219,15 +226,35 @@ export function AdminPortal() {
                         <span className="badge ok">Active</span>
                       )}
                     </td>
+                    <td style={{ padding: "0.75rem 0.5rem" }}>
+                      <CreditsCell
+                        userId={u.user_id}
+                        field="ai_credits"
+                        credits={u.ai_credits ?? 0}
+                        onSaved={(userId, credits) => setUsers(users.map(x => x.user_id === userId ? { ...x, ai_credits: credits } : x))}
+                      />
+                    </td>
+                    <td style={{ padding: "0.75rem 0.5rem" }}>
+                      {u.ats_ai_credits === null ? (
+                        <span className="hint compact">Not a recruiter</span>
+                      ) : (
+                        <CreditsCell
+                          userId={u.user_id}
+                          field="ats_ai_credits"
+                          credits={u.ats_ai_credits}
+                          onSaved={(userId, credits) => setUsers(users.map(x => x.user_id === userId ? { ...x, ats_ai_credits: credits } : x))}
+                        />
+                      )}
+                    </td>
                     <td style={{ padding: "0.75rem 0.5rem", display: "flex", gap: "0.5rem" }}>
-                      <button 
-                        className={`btn small ${u.is_blocked ? "ok" : "danger"}`} 
+                      <button
+                        className={`btn small ${u.is_blocked ? "ok" : "danger"}`}
                         onClick={() => toggleBlock(u.user_id, u.is_blocked)}
                       >
                         {u.is_blocked ? "Unblock" : "Block"}
                       </button>
-                      <button 
-                        className="btn small primary" 
+                      <button
+                        className="btn small primary"
                         onClick={() => setViewUser(u)}
                       >
                         View Details
@@ -245,6 +272,65 @@ export function AdminPortal() {
         <UserDetailsModal user={viewUser} onClose={() => setViewUser(null)} />
       )}
     </div>
+  );
+}
+
+// Platform-managed AI credits (2026-08-18) — the only way a user gets more, for this first version (no
+// self-serve purchase flow exists yet). One small numeric input + "Set" per row, same table-row pattern
+// as the Block/Unblock action next to it. `field` (2026-08-19) lets this same cell also drive
+// ats_ai_credits (automailsend_recruiter_profiles) for the ATS Credits column.
+function CreditsCell({ userId, field, credits, onSaved }: { userId: string; field: "ai_credits" | "ats_ai_credits"; credits: number; onSaved: (userId: string, credits: number) => void }) {
+  const [value, setValue] = useState(String(credits));
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    setValue(String(credits));
+  }, [credits]);
+
+  async function save() {
+    const n = Number(value);
+    if (!Number.isFinite(n) || n < 0) {
+      toast.error("Enter a valid non-negative number.");
+      return;
+    }
+    setSaving(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const headers = {
+        "Content-Type": "application/json",
+        ...(session ? { "Authorization": `Bearer ${session.access_token}` } : {}),
+      };
+      const res = await fetch("/api/admin/users", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ user_id: userId, [field]: n }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        toast.success("Credits updated.");
+        onSaved(userId, n);
+      } else {
+        toast.error(data.error || "Failed to update credits");
+      }
+    } catch (err) {
+      toast.error("Network error");
+    }
+    setSaving(false);
+  }
+
+  return (
+    <span style={{ display: "inline-flex", gap: "0.3rem", alignItems: "center" }}>
+      <input
+        type="number"
+        min={0}
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        style={{ width: "70px", padding: "0.2rem 0.4rem" }}
+      />
+      <button className="btn small" onClick={save} disabled={saving}>
+        {saving ? "…" : "Set"}
+      </button>
+    </span>
   );
 }
 
@@ -358,8 +444,10 @@ function UserDetailsModal({ user, onClose }: { user: UserState; onClose: () => v
                 <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
                   {details.templates.length === 0 ? <p className="hint">No custom templates saved.</p> : null}
                   {details.templates.map((tpl: any) => (
-                    <div key={tpl.role} style={{ background: "var(--bg-panel)", padding: "1rem", borderRadius: "8px", border: "1px solid var(--line)" }}>
-                      <h4 style={{ margin: "0 0 0.5rem 0", color: "var(--accent)", textTransform: "capitalize" }}>Role: {tpl.role}</h4>
+                    <div key={tpl.id} style={{ background: "var(--bg-panel)", padding: "1rem", borderRadius: "8px", border: "1px solid var(--line)" }}>
+                      <h4 style={{ margin: "0 0 0.5rem 0", color: "var(--accent)", textTransform: "capitalize" }}>
+                        Role: {tpl.role} — {tpl.label || "Default"}{tpl.is_default ? " (default)" : ""}
+                      </h4>
                       <p style={{ margin: "0 0 0.25rem 0", fontWeight: 500 }}>Subject: {tpl.subject}</p>
                       <pre style={{ fontSize: "0.8rem", whiteSpace: "pre-wrap", background: "var(--bg-input)", padding: "0.5rem", borderRadius: "4px" }}>
                         {tpl.content}

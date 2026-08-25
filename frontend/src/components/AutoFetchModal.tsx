@@ -3,39 +3,19 @@
 import { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
 import toast from "react-hot-toast";
-import type { AutoFetchConfig, Role } from "@/lib/types";
-import { ROLE_LABELS, ROLES } from "@/lib/types";
+import type { AutoFetchConfig, RoleDef } from "@/lib/types";
 import { HelpTooltip } from "./HelpTooltip";
 import { CookieHelpModal } from "./CookieHelpModal";
 
 type Props = {
   config: AutoFetchConfig;
+  roleDefs: RoleDef[];
   onSave: (newConfig: AutoFetchConfig) => void;
   onClose: () => void;
 };
 
-type KeywordMapping = { keyword: string, role: Role };
-
-export function AutoFetchModal({ config, onSave, onClose }: Props) {
+export function AutoFetchModal({ config, roleDefs, onSave, onClose }: Props) {
   const [enabled, setEnabled] = useState(config.enabled);
-  
-  const [keywordMappings, setKeywordMappings] = useState<KeywordMapping[]>(() => {
-    try {
-      const parsed = JSON.parse(config.keywords);
-      if (Array.isArray(parsed)) return parsed;
-    } catch {}
-    // Fallback to old format
-    if (config.keywords.trim()) {
-      return config.keywords.split(",").map(k => ({
-        keyword: k.trim(),
-        role: config.targetRole || "fullstack"
-      }));
-    }
-    return [];
-  });
-
-  const [newKeyword, setNewKeyword] = useState("");
-  const [newRole, setNewRole] = useState<Role>("fullstack");
 
   const [intervalMin, setIntervalMin] = useState(config.intervalMin || 180);
   const [paginationLimit, setPaginationLimit] = useState(config.paginationLimit || 3);
@@ -75,7 +55,11 @@ export function AutoFetchModal({ config, onSave, onClose }: Props) {
   const isJsessionValid = jsessionid === "" || /^ajax:\d+$/.test(jsessionid);
   const isLiAtValid = liAt === "" || /^[a-zA-Z0-9_-]{20,}$/.test(liAt);
 
-  const hasKeywords = keywordMappings.length > 0;
+  // Keywords now live per-role (see the Jobs & Roles page) — enabling requires at least one role to
+  // have at least one keyword configured there.
+  const totalKeywords = roleDefs.reduce((sum, d) => sum + d.keywords.length, 0);
+  const rolesWithKeywords = roleDefs.filter((d) => d.keywords.length > 0).length;
+  const hasKeywords = totalKeywords > 0;
 
   // Attempt to parse rawHeaders to display what was found
   let parsedHeaders: Record<string, string> | null = null;
@@ -179,8 +163,6 @@ export function AutoFetchModal({ config, onSave, onClose }: Props) {
 
       onSave({
         enabled: finalEnabled,
-        keywords: JSON.stringify(keywordMappings),
-        targetRole: keywordMappings.length > 0 ? keywordMappings[0].role : "fullstack", // Fallback for types
         intervalMin: finalInterval,
         paginationLimit: Math.max(3, paginationLimit || 3),
         paginationDelaySec: Math.max(1, paginationDelaySec || 10),
@@ -381,89 +363,15 @@ export function AutoFetchModal({ config, onSave, onClose }: Props) {
             </div>
           </label>
 
-          <div className="grid-2" style={{ border: "1px solid var(--line)", padding: "1rem", borderRadius: "8px", background: "var(--bg)" }}>
-            <label className="field" style={{ gridColumn: "1 / -1" }}>
-              <span>
-                Keyword to Role Mappings
-                <HelpTooltip 
-                  title="Search Keywords" 
-                  content={
-                    <>
-                      <p>Add search keywords and map them to a specific email template category.</p>
-                      <p>The scraper will search LinkedIn for each keyword individually, and automatically assign the selected Role to the extracted leads!</p>
-                    </>
-                  } 
-                />
-              </span>
-            </label>
-            
-            <div style={{ display: "flex", gap: "0.5rem", gridColumn: "1 / -1", alignItems: "flex-end" }}>
-              <div style={{ flex: 2 }}>
-                <input
-                  id="tour-autofetch-keywords"
-                  type="text"
-                  value={newKeyword}
-                  onChange={(e) => setNewKeyword(e.target.value)}
-                  placeholder="e.g. software engineer"
-                  style={{ width: "100%", padding: "0.5rem", borderRadius: "4px", border: "1px solid var(--line)", background: "var(--bg-panel)", color: "var(--fg)" }}
-                />
-              </div>
-              <div style={{ flex: 1 }}>
-                <select
-                  id="tour-autofetch-role"
-                  value={newRole}
-                  onChange={(e) => setNewRole(e.target.value as Role)}
-                  style={{ width: "100%", padding: "0.5rem", borderRadius: "4px", border: "1px solid var(--line)", background: "var(--bg-panel)", color: "var(--fg)" }}
-                >
-                  {ROLES.map((role) => (
-                    <option key={role} value={role}>{ROLE_LABELS[role]}</option>
-                  ))}
-                </select>
-              </div>
-              <button 
-                id="tour-autofetch-add"
-                className="btn filled" 
-                type="button"
-                onClick={() => {
-                  if (newKeyword.trim()) {
-                    if (keywordMappings.length >= 3) {
-                      toast.error("You can only add up to 3 keywords.");
-                      return;
-                    }
-                    setKeywordMappings([...keywordMappings, { keyword: newKeyword.trim(), role: newRole }]);
-                    setNewKeyword("");
-                  }
-                }}
-              >
-                Add
-              </button>
-            </div>
-
-            <div style={{ gridColumn: "1 / -1", display: "flex", flexDirection: "column", gap: "0.5rem", marginTop: "0.5rem" }}>
-              {keywordMappings.length === 0 ? (
-                <div style={{ padding: "0.5rem", textAlign: "center", color: "var(--muted)", fontStyle: "italic", fontSize: "0.9rem" }}>
-                  No keywords added. Add at least one to enable auto-fetch.
-                </div>
-              ) : (
-                keywordMappings.map((map, idx) => (
-                  <div key={idx} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "0.5rem 0.75rem", background: "var(--bg-panel)", borderRadius: "6px", border: "1px solid var(--line)", fontSize: "0.9rem" }}>
-                    <div>
-                      <strong>{map.keyword}</strong>
-                      <span style={{ margin: "0 0.5rem", color: "var(--muted)" }}>→</span>
-                      <span style={{ color: "var(--accent)" }}>{ROLE_LABELS[map.role]} Template</span>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setKeywordMappings(keywordMappings.filter((_, i) => i !== idx))}
-                      style={{ background: "transparent", border: "none", color: "var(--err)", cursor: "pointer", fontSize: "0.85rem", padding: "0.25rem" }}
-                    >
-                      Remove
-                    </button>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
+          <p className="hint compact" style={{ display: "flex", alignItems: "center", gap: "0.3rem" }}>
+            {hasKeywords
+              ? `${totalKeywords} keyword(s) across ${rolesWithKeywords} role(s) — manage on Jobs & Roles`
+              : "No keywords configured yet"}
+            <HelpTooltip
+              title="Search Keywords"
+              content={<p>Keywords now live on each role, on the <strong>Jobs & Roles</strong> page — the scraper searches every keyword across every role and tags results with that role automatically.</p>}
+            />
+          </p>
 
           <div className="grid-2">
             <label className="field">

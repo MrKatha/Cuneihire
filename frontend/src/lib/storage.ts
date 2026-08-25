@@ -1,50 +1,71 @@
 import { supabase } from "./supabase";
 import {
+  emptyResumeData,
+  emptyCandidateProfile,
   type Recipient,
+  type ResumeEntry,
+  type ResumeProfile,
   type Role,
+  type RoleDef,
   type RoleTemplate,
   type SentRecord,
+  type ReplyRecord,
   type SmtpConfig,
+  type SmtpAccount,
   type Attachment,
   type AutoFetchConfig,
   type AutomailConfig,
+  type AiConfig,
+  type CandidateProfile,
+  type RecruiterProfile,
+  type JobPosting,
+  type JobApplication,
 } from "@/lib/types";
 
 export type PersistedState = {
   config: SmtpConfig;
   recipients: Recipient[];
-  templates: Record<Role, RoleTemplate>;
+  // A role's template/resume LIBRARY (2026-08-18) — was one row per role, now any number, one flagged
+  // default, any subset flagged for randomization. See docs/architecture.md.
+  templates: Record<Role, RoleTemplate[]>;
+  resumes: Record<Role, ResumeEntry[]>;
+  // Resume Builder profiles (2026-08-18) — structured, section-by-section resume data, distinct from the
+  // `resumes` file library above. Not per-role — a user just keeps a flat list of their own resumes.
+  resumeProfiles: ResumeProfile[];
+  roleDefs: RoleDef[];
+  smtpAccounts: SmtpAccount[];
   delaySec: number;
   activeTemplateRole: Role;
   defaultTitle: string;
   sentLog: SentRecord[];
+  // Reply monitoring (2026-08-19) — read-only, populated by replyPoll.worker.js. See ReplyRecord.
+  replies: ReplyRecord[];
   autoFetch: AutoFetchConfig;
   automail: AutomailConfig;
+  // The AI tab (2026-08-18) — see AiConfig's comment in types.ts.
+  ai: AiConfig;
+  // Admin-granted, read-only from here. Set via the Admin Portal, never by the user themselves.
+  aiCredits: number;
+  profile: CandidateProfile;
   batchSendPending: boolean;
 };
-
-export function emptyTemplates(): Record<Role, RoleTemplate> {
-  return {
-    devops: { subject: "", content: "", files: [] },
-    fullstack: { subject: "", content: "", files: [] },
-    "ai-automation": { subject: "", content: "", files: [] },
-    custom: { subject: "", content: "", files: [] },
-  };
-}
 
 export function defaultState(): PersistedState {
   return {
     config: { email: "", appPassword: "", fromName: "", configured: false },
     recipients: [],
-    templates: emptyTemplates(),
+    templates: {},
+    resumes: {},
+    resumeProfiles: [],
+    roleDefs: [],
+    smtpAccounts: [],
     delaySec: 3,
     activeTemplateRole: "fullstack",
     defaultTitle: "",
     sentLog: [],
+    replies: [],
     autoFetch: {
       enabled: false,
-      keywords: "",
-      targetRole: "fullstack",
       intervalMin: 5,
       paginationLimit: 5,
       paginationDelaySec: 10,
@@ -56,10 +77,17 @@ export function defaultState(): PersistedState {
     automail: {
       enabled: false,
       dailyLimit: 50,
-      aiProvider: "none",
-      aiApiKey: "",
-      aiPrompt: "You are an expert recruiter. Analyze the following LinkedIn post text. The author's email is {{email}}. Write a highly personalized, friendly, and concise email subject and body offering our services. CRITICAL: DO NOT use placeholders like [Name], [Company], etc. If you don't know a piece of information, either infer it from the context or rephrase to omit it. Always sign off with a proper name if available, never use placeholders or generic company names for the sender signature. Output ONLY valid JSON with 'subject' and 'body' keys.",
+      candidateInfo: "",
     },
+    ai: {
+      enabled: false,
+      temperature: 0.4,
+      matchStrictness: 0,
+    },
+    aiCredits: 0,
+    // Loaded/saved separately via loadCandidateProfile/saveCandidateProfile (its own table, own section
+    // below) — not part of the app_state round trip any more. Kept here only as the field's shape default.
+    profile: emptyCandidateProfile(),
     batchSendPending: false,
   };
 }
@@ -128,8 +156,6 @@ export async function loadState(userId: string): Promise<PersistedState> {
     
     state.autoFetch = {
       enabled: appState.auto_fetch_enabled || false,
-      keywords: appState.auto_fetch_keywords || "",
-      targetRole: (appState.auto_fetch_template_role as any) || "fullstack",
       intervalMin: appState.auto_fetch_interval_min || 5,
       paginationLimit: appState.auto_fetch_pagination_limit || 5,
       paginationDelaySec: appState.auto_fetch_pagination_delay_sec || 10,
@@ -142,10 +168,17 @@ export async function loadState(userId: string): Promise<PersistedState> {
     state.automail = {
       enabled: appState.automail_enabled || false,
       dailyLimit: appState.daily_mail_limit || 50,
-      aiProvider: appState.ai_provider || "none",
-      aiApiKey: appState.ai_api_key || "",
-      aiPrompt: appState.ai_prompt || defaultState().automail.aiPrompt,
+      candidateInfo: appState.candidate_info || "",
     };
+    state.ai = {
+      enabled: appState.ai_personalization_enabled || false,
+      temperature: typeof appState.ai_temperature === "number" ? appState.ai_temperature : 0.4,
+      matchStrictness: appState.ai_match_strictness || 0,
+    };
+    state.aiCredits = appState.ai_credits ?? 0;
+    // profile is no longer read from app_state — see loadCandidateProfile below. The old candidate_*
+    // columns here are left in place, unused, same precedent as every other superseded column this
+    // project (delay_sec / old ai_prompt / app_state.config — see supabase_setup.sql section 27).
     state.batchSendPending = appState.batch_send_pending || false;
   }
 
@@ -166,23 +199,66 @@ export async function loadState(userId: string): Promise<PersistedState> {
       phone_status: r.phone_status || "pending",
       source: r.source || "auto_fetch",
       source_url: r.source_url,
+      job_post_id: r.job_post_id,
+      author_name: r.author_name || undefined,
+      context_text: r.context_text || undefined,
+      match_score: r.match_score ?? null,
+      match_reasoning: r.match_reasoning || null,
+      match_analyzed_at: r.match_analyzed_at || null,
       scraped_at: r.scraped_at,
+      hasReplied: !!r.has_replied,
+      repliedAt: r.replied_at || undefined,
+      replyCount: r.reply_count || 0,
     }));
   }
 
-  // Load templates
+  // Load templates — a library per role now (see PersistedState.templates), grouped by role instead of
+  // overwriting one slot.
   const { data: templates } = await supabase
     .from("automailsend_templates")
     .select("*")
-    .eq("user_id", userId);
+    .eq("user_id", userId)
+    .order("created_at", { ascending: true });
   if (templates) {
     templates.forEach((t) => {
-      state.templates[t.role as Role] = {
-        subject: t.subject,
-        content: t.content,
-        files: t.files as Attachment[],
-      };
+      const role = t.role as Role;
+      (state.templates[role] = state.templates[role] || []).push(mapTemplateRow(t));
     });
+  }
+
+  // Load resumes — same library shape, files only.
+  const { data: resumes } = await supabase
+    .from("automailsend_resumes")
+    .select("*")
+    .eq("user_id", userId)
+    .order("created_at", { ascending: true });
+  if (resumes) {
+    resumes.forEach((r) => {
+      const role = r.role as Role;
+      (state.resumes[role] = state.resumes[role] || []).push({
+        id: r.id,
+        role: r.role,
+        label: r.label || "Resume",
+        files: r.files as Attachment[],
+        isDefault: !!r.is_default,
+        inRandomizer: !!r.in_randomizer,
+      });
+    });
+  }
+
+  // Load Resume Builder profiles — flat list, not per-role.
+  const { data: resumeProfiles } = await supabase
+    .from("automailsend_resume_profiles")
+    .select("*")
+    .eq("user_id", userId)
+    .order("created_at", { ascending: true });
+  if (resumeProfiles) {
+    state.resumeProfiles = resumeProfiles.map((p) => ({
+      id: p.id,
+      label: p.label || "My Resume",
+      templateId: (p.template_id || "modern") as ResumeProfile["templateId"],
+      data: { ...emptyResumeData(), ...(p.data || {}) },
+    }));
   }
 
   // Load sent log
@@ -201,10 +277,256 @@ export async function loadState(userId: string): Promise<PersistedState> {
       status: s.status || "sent",
       error: s.error_message || undefined,
       sentAt: s.sent_at,
+      templateLabel: s.template_label || undefined,
+      resumeLabel: s.resume_label || undefined,
     }));
   }
 
+  // Load replies (2026-08-19) — read-only, written by the backend's IMAP poller.
+  const { data: replies } = await supabase
+    .from("automailsend_replies")
+    .select("*")
+    .eq("user_id", userId)
+    .order("received_at", { ascending: false });
+  if (replies) {
+    state.replies = replies.map((r) => ({
+      id: r.id,
+      recipientId: r.recipient_id || undefined,
+      fromEmail: r.from_email,
+      subject: r.subject || undefined,
+      bodySnippet: r.body_snippet || undefined,
+      receivedAt: r.received_at || r.created_at,
+      matchMethod: (r.match_method as ReplyRecord["matchMethod"]) || undefined,
+    }));
+  }
+
+  state.roleDefs = await ensureDefaultRoleDefs(userId);
+  state.smtpAccounts = await loadSmtpAccounts(userId);
+
   return state;
+}
+
+// --- Role defs (user-managed job targets — keywords + rules, replacing the old hardcoded 4-value Role
+// type; see the Jobs & Roles page). ---
+
+function mapRoleDefRow(d: any): RoleDef {
+  return {
+    id: d.id,
+    key: d.key,
+    label: d.label,
+    keywords: d.keywords || [],
+    workMode: (d.work_mode as RoleDef["workMode"]) || "any",
+    salaryCurrency: d.salary_currency || "USD",
+    salaryPeriod: (d.salary_period as RoleDef["salaryPeriod"]) || "annual",
+    salaryMin: d.salary_min ?? null,
+    salaryMax: d.salary_max ?? null,
+    preferredLocations: d.preferred_locations || [],
+    employmentType: (d.employment_type as RoleDef["employmentType"]) || "any",
+    companySize: (d.company_size as RoleDef["companySize"]) || "any",
+    visaSponsorship: (d.visa_sponsorship as RoleDef["visaSponsorship"]) || "any",
+    availability: (d.availability as RoleDef["availability"]) || "",
+    otherNotes: d.other_notes || "",
+    selectedExperienceIds: d.selected_experience_ids || [],
+    selectedEducationIds: d.selected_education_ids || [],
+    selectedProjectIds: d.selected_project_ids || [],
+    selectedCertificationIds: d.selected_certification_ids || [],
+    selectedSkillIds: d.selected_skill_ids || [],
+    selectedFileIds: d.selected_file_ids || [],
+    resumeId: d.resume_id ?? null,
+    resumeMode: (d.resume_mode as RoleDef["resumeMode"]) || "profile",
+    scratchResumeProfileId: d.scratch_resume_profile_id ?? null,
+    emailSendMode: (d.email_send_mode as RoleDef["emailSendMode"]) || "manual",
+    selectedTemplateId: d.selected_template_id ?? null,
+  };
+}
+
+export async function loadRoleDefs(userId: string): Promise<RoleDef[]> {
+  const { data } = await supabase
+    .from("automailsend_role_defs")
+    .select("*")
+    .eq("user_id", userId)
+    .order("created_at", { ascending: true });
+  return (data || []).map(mapRoleDefRow);
+}
+
+// A brand-new user has zero role defs — that's the intended starting state (2026-08-18: no more
+// preloaded DevOps/Fullstack/AI Automation/Custom presets). Every role is built from scratch on the
+// Jobs & Roles tab ("+ Add title"), which already has its own "No roles yet" empty state. This function
+// is now just a thin alias kept so callers don't need to change; it seeds nothing.
+export async function ensureDefaultRoleDefs(userId: string): Promise<RoleDef[]> {
+  return loadRoleDefs(userId);
+}
+
+// Slugify a label into a role key, e.g. "Senior Rust Engineer" -> "senior-rust-engineer".
+export function slugifyRoleKey(label: string): string {
+  const base = label
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return base || `role-${Date.now()}`;
+}
+
+export async function saveRoleDef(
+  userId: string,
+  def: Partial<RoleDef> & { key: string; label: string }
+): Promise<RoleDef | null> {
+  if (def.id) {
+    // Partial update — only touch columns actually passed in, so a rename-only call (or any other
+    // partial call) never blanks out keywords/rules the caller didn't mean to change.
+    const payload: Record<string, unknown> = { key: def.key, label: def.label };
+    if (def.keywords !== undefined) payload.keywords = def.keywords;
+    if (def.workMode !== undefined) payload.work_mode = def.workMode;
+    if (def.salaryCurrency !== undefined) payload.salary_currency = def.salaryCurrency;
+    if (def.salaryPeriod !== undefined) payload.salary_period = def.salaryPeriod;
+    if (def.salaryMin !== undefined) payload.salary_min = def.salaryMin;
+    if (def.salaryMax !== undefined) payload.salary_max = def.salaryMax;
+    if (def.preferredLocations !== undefined) payload.preferred_locations = def.preferredLocations;
+    if (def.employmentType !== undefined) payload.employment_type = def.employmentType;
+    if (def.companySize !== undefined) payload.company_size = def.companySize;
+    if (def.visaSponsorship !== undefined) payload.visa_sponsorship = def.visaSponsorship;
+    if (def.availability !== undefined) payload.availability = def.availability;
+    if (def.otherNotes !== undefined) payload.other_notes = def.otherNotes;
+    if (def.selectedExperienceIds !== undefined) payload.selected_experience_ids = def.selectedExperienceIds;
+    if (def.selectedEducationIds !== undefined) payload.selected_education_ids = def.selectedEducationIds;
+    if (def.selectedProjectIds !== undefined) payload.selected_project_ids = def.selectedProjectIds;
+    if (def.selectedCertificationIds !== undefined) payload.selected_certification_ids = def.selectedCertificationIds;
+    if (def.selectedSkillIds !== undefined) payload.selected_skill_ids = def.selectedSkillIds;
+    if (def.selectedFileIds !== undefined) payload.selected_file_ids = def.selectedFileIds;
+    if (def.resumeId !== undefined) payload.resume_id = def.resumeId;
+    if (def.resumeMode !== undefined) payload.resume_mode = def.resumeMode;
+    if (def.scratchResumeProfileId !== undefined) payload.scratch_resume_profile_id = def.scratchResumeProfileId;
+    if (def.emailSendMode !== undefined) payload.email_send_mode = def.emailSendMode;
+    if (def.selectedTemplateId !== undefined) payload.selected_template_id = def.selectedTemplateId;
+
+    const { data, error } = await supabase
+      .from("automailsend_role_defs")
+      .update(payload)
+      .eq("id", def.id)
+      .select("*")
+      .single();
+    if (error || !data) return null;
+    return mapRoleDefRow(data);
+  }
+  const { data, error } = await supabase
+    .from("automailsend_role_defs")
+    .insert({
+      user_id: userId,
+      key: def.key,
+      label: def.label,
+      keywords: def.keywords ?? [],
+      work_mode: def.workMode ?? "any",
+      salary_currency: def.salaryCurrency ?? "USD",
+      salary_period: def.salaryPeriod ?? "annual",
+      salary_min: def.salaryMin ?? null,
+      salary_max: def.salaryMax ?? null,
+      preferred_locations: def.preferredLocations ?? [],
+      employment_type: def.employmentType ?? "any",
+      company_size: def.companySize ?? "any",
+      visa_sponsorship: def.visaSponsorship ?? "any",
+      availability: def.availability ?? "",
+      other_notes: def.otherNotes ?? "",
+      // Defaults to "everything selected" is the caller's job (it's the one holding the candidate's
+      // current profile item ids at role-creation time — see page.tsx's handleAddRole) — this just
+      // respects whatever's passed, empty if nothing was.
+      selected_experience_ids: def.selectedExperienceIds ?? [],
+      selected_education_ids: def.selectedEducationIds ?? [],
+      selected_project_ids: def.selectedProjectIds ?? [],
+      selected_certification_ids: def.selectedCertificationIds ?? [],
+      selected_skill_ids: def.selectedSkillIds ?? [],
+      selected_file_ids: def.selectedFileIds ?? [],
+      // Omitted entirely at role-creation time (see page.tsx's handleAddRole) — defaults to null, i.e.
+      // "inherit the candidate's global default resume," the correct forgiving default here too.
+      resume_id: def.resumeId ?? null,
+      resume_mode: def.resumeMode ?? "profile",
+      scratch_resume_profile_id: def.scratchResumeProfileId ?? null,
+      email_send_mode: def.emailSendMode ?? "manual",
+      selected_template_id: def.selectedTemplateId ?? null,
+    })
+    .select("*")
+    .single();
+  if (error || !data) return null;
+  return mapRoleDefRow(data);
+}
+
+export async function deleteRoleDef(id: string) {
+  const { error } = await supabase.from("automailsend_role_defs").delete().eq("id", id);
+  if (error) throw error;
+}
+
+// --- SMTP accounts (a pool of mailboxes, replacing the single SmtpConfig as the source of truth for sending) ---
+
+function mapSmtpAccountRow(a: any): SmtpAccount {
+  return {
+    id: a.id,
+    label: a.label || "",
+    provider: a.provider || "gmail",
+    email: a.email,
+    appPassword: a.app_password,
+    host: a.host || "smtp.gmail.com",
+    port: a.port || 465,
+    fromEmail: a.from_email || "",
+    fromName: a.from_name || "",
+    dailyLimit: a.daily_limit || 50,
+    isVerified: !!a.is_verified,
+    isActive: a.is_active !== false,
+    imapEnabled: !!a.imap_enabled,
+    imapHost: a.imap_host || undefined,
+    imapPort: a.imap_port || 993,
+  };
+}
+
+export async function loadSmtpAccounts(userId: string): Promise<SmtpAccount[]> {
+  const { data } = await supabase
+    .from("automailsend_smtp_accounts")
+    .select("*")
+    .eq("user_id", userId)
+    .order("created_at", { ascending: true });
+  return (data || []).map(mapSmtpAccountRow);
+}
+
+export async function saveSmtpAccount(
+  userId: string,
+  account: Partial<SmtpAccount> & { id?: string; email: string; appPassword: string }
+): Promise<SmtpAccount | null> {
+  const payload = {
+    label: account.label ?? "",
+    provider: account.provider ?? "gmail",
+    email: account.email,
+    app_password: account.appPassword,
+    host: account.host ?? "smtp.gmail.com",
+    port: account.port ?? 465,
+    from_email: account.fromEmail ?? "",
+    from_name: account.fromName ?? "",
+    daily_limit: account.dailyLimit ?? 50,
+    is_verified: account.isVerified ?? false,
+    is_active: account.isActive ?? true,
+    imap_enabled: account.imapEnabled ?? false,
+    imap_host: account.imapHost ?? null,
+    imap_port: account.imapPort ?? 993,
+  };
+  if (account.id) {
+    const { data, error } = await supabase
+      .from("automailsend_smtp_accounts")
+      .update(payload)
+      .eq("id", account.id)
+      .select("*")
+      .single();
+    if (error || !data) return null;
+    return mapSmtpAccountRow(data);
+  }
+  const { data, error } = await supabase
+    .from("automailsend_smtp_accounts")
+    .insert({ user_id: userId, ...payload })
+    .select("*")
+    .single();
+  if (error || !data) return null;
+  return mapSmtpAccountRow(data);
+}
+
+export async function deleteSmtpAccount(id: string) {
+  const { error } = await supabase.from("automailsend_smtp_accounts").delete().eq("id", id);
+  if (error) throw error;
 }
 
 export async function saveAppState(userId: string, state: PersistedState) {
@@ -219,8 +541,6 @@ export async function saveAppState(userId: string, state: PersistedState) {
       active_template_role: state.activeTemplateRole,
       default_title: state.defaultTitle,
       auto_fetch_enabled: state.autoFetch.enabled,
-      auto_fetch_keywords: state.autoFetch.keywords,
-      auto_fetch_template_role: state.autoFetch.targetRole,
       auto_fetch_interval_min: state.autoFetch.intervalMin,
       auto_fetch_pagination_limit: state.autoFetch.paginationLimit,
       auto_fetch_pagination_delay_sec: state.autoFetch.paginationDelaySec,
@@ -230,26 +550,172 @@ export async function saveAppState(userId: string, state: PersistedState) {
       post_age_filter: state.autoFetch.postAgeFilter,
       automail_enabled: state.automail.enabled,
       daily_mail_limit: state.automail.dailyLimit,
-      ai_provider: state.automail.aiProvider,
-      ai_api_key: state.automail.aiApiKey,
-      ai_prompt: state.automail.aiPrompt,
+      ai_personalization_enabled: state.ai.enabled,
+      ai_temperature: state.ai.temperature,
+      ai_match_strictness: state.ai.matchStrictness,
+      candidate_info: state.automail.candidateInfo,
+      // profile fields no longer written here — see saveCandidateProfile (its own table now).
     },
     { onConflict: "user_id" }
   );
 }
 
-export async function saveTemplates(
+// --- Email template library (2026-08-18: real per-row CRUD now that a role can have many, not one —
+// same shape as saveRoleDef/deleteRoleDef above) ---
+
+function mapTemplateRow(t: any): RoleTemplate {
+  return {
+    id: t.id,
+    label: t.label || "Default",
+    subject: t.subject || "",
+    content: t.content || "",
+    files: (t.files || []) as Attachment[],
+    isDefault: !!t.is_default,
+    inRandomizer: !!t.in_randomizer,
+  };
+}
+
+export async function saveTemplate(
   userId: string,
-  templates: Record<Role, RoleTemplate>
-) {
-  const upsertData = Object.entries(templates).map(([role, t]) => ({
-    user_id: userId,
-    role,
-    subject: t.subject,
-    content: t.content,
-    files: t.files,
-  }));
-  await supabase.from("automailsend_templates").upsert(upsertData, { onConflict: "user_id, role" });
+  role: Role,
+  template: Partial<RoleTemplate> & { id?: string }
+): Promise<RoleTemplate | null> {
+  const payload: Record<string, unknown> = {};
+  if (template.label !== undefined) payload.label = template.label;
+  if (template.subject !== undefined) payload.subject = template.subject;
+  if (template.content !== undefined) payload.content = template.content;
+  if (template.files !== undefined) payload.files = template.files;
+  if (template.inRandomizer !== undefined) payload.in_randomizer = template.inRandomizer;
+
+  if (template.id) {
+    const { data, error } = await supabase
+      .from("automailsend_templates")
+      .update(payload)
+      .eq("id", template.id)
+      .select("*")
+      .single();
+    if (error || !data) return null;
+    return mapTemplateRow(data);
+  }
+  const { data, error } = await supabase
+    .from("automailsend_templates")
+    .insert({ user_id: userId, role, ...payload })
+    .select("*")
+    .single();
+  if (error || !data) return null;
+  return mapTemplateRow(data);
+}
+
+export async function deleteTemplate(id: string) {
+  const { error } = await supabase.from("automailsend_templates").delete().eq("id", id);
+  if (error) throw error;
+}
+
+// Unsets every other template for the role, then sets this one — two calls, not a transaction, but the
+// only writer is the signed-in user themself so there's no real concurrency risk here.
+export async function setDefaultTemplate(userId: string, role: Role, id: string) {
+  await supabase.from("automailsend_templates").update({ is_default: false }).eq("user_id", userId).eq("role", role);
+  const { error } = await supabase.from("automailsend_templates").update({ is_default: true }).eq("id", id);
+  if (error) throw error;
+}
+
+// --- Resume library (deliberately separate from templates — see docs/architecture.md) ---
+
+function mapResumeRow(r: any): ResumeEntry {
+  return {
+    id: r.id,
+    role: r.role,
+    label: r.label || "Resume",
+    files: (r.files || []) as Attachment[],
+    isDefault: !!r.is_default,
+    inRandomizer: !!r.in_randomizer,
+  };
+}
+
+export async function saveResume(
+  userId: string,
+  role: Role,
+  resume: Partial<ResumeEntry> & { id?: string }
+): Promise<ResumeEntry | null> {
+  const payload: Record<string, unknown> = {};
+  if (resume.label !== undefined) payload.label = resume.label;
+  if (resume.files !== undefined) payload.files = resume.files;
+  if (resume.inRandomizer !== undefined) payload.in_randomizer = resume.inRandomizer;
+
+  if (resume.id) {
+    const { data, error } = await supabase
+      .from("automailsend_resumes")
+      .update(payload)
+      .eq("id", resume.id)
+      .select("*")
+      .single();
+    if (error || !data) return null;
+    return mapResumeRow(data);
+  }
+  const { data, error } = await supabase
+    .from("automailsend_resumes")
+    .insert({ user_id: userId, role, ...payload })
+    .select("*")
+    .single();
+  if (error || !data) return null;
+  return mapResumeRow(data);
+}
+
+export async function deleteResume(id: string) {
+  const { error } = await supabase.from("automailsend_resumes").delete().eq("id", id);
+  if (error) throw error;
+}
+
+export async function setDefaultResume(userId: string, role: Role, id: string) {
+  await supabase.from("automailsend_resumes").update({ is_default: false }).eq("user_id", userId).eq("role", role);
+  const { error } = await supabase.from("automailsend_resumes").update({ is_default: true }).eq("id", id);
+  if (error) throw error;
+}
+
+// --- Resume Builder profiles (2026-08-18) — structured resume data, distinct from the file library
+// above. Flat per-user list, not per-role. Same per-row CRUD shape as everything else in this file. ---
+
+export async function saveResumeProfile(
+  userId: string,
+  profile: Partial<ResumeProfile> & { id?: string }
+): Promise<ResumeProfile | null> {
+  const payload: Record<string, unknown> = {};
+  if (profile.label !== undefined) payload.label = profile.label;
+  if (profile.templateId !== undefined) payload.template_id = profile.templateId;
+  if (profile.data !== undefined) payload.data = profile.data;
+
+  if (profile.id) {
+    const { data, error } = await supabase
+      .from("automailsend_resume_profiles")
+      .update(payload)
+      .eq("id", profile.id)
+      .select("*")
+      .single();
+    if (error || !data) return null;
+    return {
+      id: data.id,
+      label: data.label || "My Resume",
+      templateId: (data.template_id || "modern") as ResumeProfile["templateId"],
+      data: { ...emptyResumeData(), ...(data.data || {}) },
+    };
+  }
+  const { data, error } = await supabase
+    .from("automailsend_resume_profiles")
+    .insert({ user_id: userId, ...payload })
+    .select("*")
+    .single();
+  if (error || !data) return null;
+  return {
+    id: data.id,
+    label: data.label || "My Resume",
+    templateId: (data.template_id || "modern") as ResumeProfile["templateId"],
+    data: { ...emptyResumeData(), ...(data.data || {}) },
+  };
+}
+
+export async function deleteResumeProfile(id: string) {
+  const { error } = await supabase.from("automailsend_resume_profiles").delete().eq("id", id);
+  if (error) throw error;
 }
 
 export async function syncRecipients(userId: string, recipients: Recipient[]) {
@@ -291,6 +757,8 @@ export async function addSentLog(
     status: record.status,
     error_message: record.error || null,
     sent_at: record.sentAt,
+    template_label: record.templateLabel || null,
+    resume_label: record.resumeLabel || null,
   });
 
   // Also update the recipient's status so the UI reflects it immediately
@@ -298,4 +766,265 @@ export async function addSentLog(
     .update({ status: record.status })
     .eq("user_id", userId)
     .eq("email", record.email);
+}
+
+// --- Candidate profile (2026-08-19) — the permanent knowledge base a role's module selection draws from
+// (see lib/resumeCompose.ts, RoleDef's comment in types.ts). Unlike RecruiterProfile, whose null-ness is
+// meaningful ("not activated yet"), every candidate has one profile — a missing row just means it hasn't
+// been saved yet, so loading returns sensible empty defaults rather than null. ---
+
+function mapCandidateProfileRow(p: any): CandidateProfile {
+  return {
+    name: p.name || "",
+    email: p.email || "",
+    phone: p.phone || "",
+    address: p.address || "",
+    bio: p.bio || "",
+    portfolioUrl: p.portfolio_url || "",
+    resumeUrl: p.resume_url || "",
+    education: p.education || [],
+    experience: p.experience || [],
+    projects: p.projects || [],
+    certifications: p.certifications || [],
+    skills: p.skills || [],
+    languages: p.languages || [],
+    // global_files (2026-08-19) — repurposed, not renamed: was a single "global default" list, is now
+    // the candidate's whole files pool, with each role picking its own subset (RoleDef.selectedFileIds).
+    // See docs/architecture.md's "Email Templates redesign" section.
+    files: p.global_files || [],
+    // global_resume_id (2026-08-20) — which pool entry is the default resume; see RoleDef.resumeId.
+    globalResumeId: p.global_resume_id ?? null,
+  };
+}
+
+export async function loadCandidateProfile(userId: string): Promise<CandidateProfile> {
+  const { data } = await supabase
+    .from("automailsend_candidate_profiles")
+    .select("*")
+    .eq("user_id", userId)
+    .maybeSingle();
+  return data ? mapCandidateProfileRow(data) : emptyCandidateProfile();
+}
+
+// Upsert rather than update — the row may not exist yet if this is the candidate's first save.
+export async function saveCandidateProfile(
+  userId: string,
+  profile: CandidateProfile
+): Promise<CandidateProfile | null> {
+  const { data, error } = await supabase
+    .from("automailsend_candidate_profiles")
+    .upsert(
+      {
+        user_id: userId,
+        name: profile.name,
+        email: profile.email,
+        phone: profile.phone,
+        address: profile.address,
+        bio: profile.bio,
+        portfolio_url: profile.portfolioUrl,
+        resume_url: profile.resumeUrl,
+        education: profile.education,
+        experience: profile.experience,
+        projects: profile.projects,
+        certifications: profile.certifications,
+        skills: profile.skills,
+        languages: profile.languages,
+        global_files: profile.files,
+        global_resume_id: profile.globalResumeId,
+      },
+      { onConflict: "user_id" }
+    )
+    .select("*")
+    .single();
+  if (error || !data) return null;
+  return mapCandidateProfileRow(data);
+}
+
+// --- Recruiter portal + AI-assisted ATS (2026-08-19) — see docs/architecture.md ---
+
+function mapRecruiterProfileRow(p: any): RecruiterProfile {
+  return {
+    userId: p.user_id,
+    companyName: p.company_name || "",
+    atsAiEnabled: !!p.ats_ai_enabled,
+    atsAiCredits: p.ats_ai_credits ?? 0,
+  };
+}
+
+// Null means the user hasn't activated recruiter mode yet — distinct from a profile with everything at
+// defaults, so callers can tell "never activated" from "activated, nothing configured yet".
+export async function loadRecruiterProfile(userId: string): Promise<RecruiterProfile | null> {
+  const { data } = await supabase
+    .from("automailsend_recruiter_profiles")
+    .select("*")
+    .eq("user_id", userId)
+    .maybeSingle();
+  return data ? mapRecruiterProfileRow(data) : null;
+}
+
+// Self-serve "Become a Recruiter" — immediate, no approval, matches this app's existing self-serve model.
+export async function becomeRecruiter(userId: string): Promise<RecruiterProfile | null> {
+  const { data, error } = await supabase
+    .from("automailsend_recruiter_profiles")
+    .insert({ user_id: userId })
+    .select("*")
+    .single();
+  if (error || !data) return null;
+  return mapRecruiterProfileRow(data);
+}
+
+export async function saveRecruiterProfile(
+  userId: string,
+  updates: Partial<Pick<RecruiterProfile, "companyName" | "atsAiEnabled">>
+): Promise<RecruiterProfile | null> {
+  const payload: Record<string, unknown> = {};
+  if (updates.companyName !== undefined) payload.company_name = updates.companyName;
+  if (updates.atsAiEnabled !== undefined) payload.ats_ai_enabled = updates.atsAiEnabled;
+
+  const { data, error } = await supabase
+    .from("automailsend_recruiter_profiles")
+    .update(payload)
+    .eq("user_id", userId)
+    .select("*")
+    .single();
+  if (error || !data) return null;
+  return mapRecruiterProfileRow(data);
+}
+
+function mapJobPostingRow(p: any): JobPosting {
+  return {
+    id: p.id,
+    recruiterId: p.recruiter_id,
+    title: p.title,
+    company: p.company || "",
+    description: p.description || "",
+    location: p.location || "",
+    workMode: (p.work_mode as JobPosting["workMode"]) || "any",
+    employmentType: (p.employment_type as JobPosting["employmentType"]) || "full-time",
+    salaryCurrency: p.salary_currency || "USD",
+    salaryPeriod: (p.salary_period as JobPosting["salaryPeriod"]) || "annual",
+    salaryMin: p.salary_min ?? null,
+    salaryMax: p.salary_max ?? null,
+    status: (p.status as JobPosting["status"]) || "open",
+    createdAt: p.created_at,
+  };
+}
+
+// Every OPEN posting from every recruiter — the candidate-facing Job Board. RLS already scopes this to
+// `status = 'open' or auth.uid() = recruiter_id`, so this select naturally can't leak a closed posting
+// that isn't the caller's own.
+export async function loadOpenJobPostings(): Promise<JobPosting[]> {
+  const { data } = await supabase
+    .from("automailsend_job_postings")
+    .select("*")
+    .eq("status", "open")
+    .order("created_at", { ascending: false });
+  return (data || []).map(mapJobPostingRow);
+}
+
+export async function loadMyJobPostings(userId: string): Promise<JobPosting[]> {
+  const { data } = await supabase
+    .from("automailsend_job_postings")
+    .select("*")
+    .eq("recruiter_id", userId)
+    .order("created_at", { ascending: false });
+  return (data || []).map(mapJobPostingRow);
+}
+
+export async function saveJobPosting(
+  recruiterId: string,
+  posting: Partial<JobPosting> & { id?: string; title: string; description: string }
+): Promise<JobPosting | null> {
+  const payload: Record<string, unknown> = {
+    title: posting.title,
+    description: posting.description,
+  };
+  if (posting.company !== undefined) payload.company = posting.company;
+  if (posting.location !== undefined) payload.location = posting.location;
+  if (posting.workMode !== undefined) payload.work_mode = posting.workMode;
+  if (posting.employmentType !== undefined) payload.employment_type = posting.employmentType;
+  if (posting.salaryCurrency !== undefined) payload.salary_currency = posting.salaryCurrency;
+  if (posting.salaryPeriod !== undefined) payload.salary_period = posting.salaryPeriod;
+  if (posting.salaryMin !== undefined) payload.salary_min = posting.salaryMin;
+  if (posting.salaryMax !== undefined) payload.salary_max = posting.salaryMax;
+  if (posting.status !== undefined) payload.status = posting.status;
+
+  if (posting.id) {
+    const { data, error } = await supabase
+      .from("automailsend_job_postings")
+      .update({ ...payload, updated_at: new Date().toISOString() })
+      .eq("id", posting.id)
+      .select("*")
+      .single();
+    if (error || !data) return null;
+    return mapJobPostingRow(data);
+  }
+  const { data, error } = await supabase
+    .from("automailsend_job_postings")
+    .insert({ recruiter_id: recruiterId, ...payload })
+    .select("*")
+    .single();
+  if (error || !data) return null;
+  return mapJobPostingRow(data);
+}
+
+export async function setJobPostingStatus(id: string, status: JobPosting["status"]) {
+  const { error } = await supabase
+    .from("automailsend_job_postings")
+    .update({ status, updated_at: new Date().toISOString() })
+    .eq("id", id);
+  if (error) throw error;
+}
+
+export async function deleteJobPosting(id: string) {
+  const { error } = await supabase.from("automailsend_job_postings").delete().eq("id", id);
+  if (error) throw error;
+}
+
+function mapJobApplicationRow(a: any): JobApplication {
+  return {
+    id: a.id,
+    jobId: a.job_id,
+    candidateId: a.candidate_id,
+    candidateName: a.candidate_name || "",
+    candidateEmail: a.candidate_email || "",
+    candidatePhone: a.candidate_phone || "",
+    coverNote: a.cover_note || "",
+    resumeData: a.resume_data ? { ...emptyResumeData(), ...a.resume_data } : null,
+    resumeFileUrl: a.resume_file_url || undefined,
+    resumeFileName: a.resume_file_name || undefined,
+    status: (a.status as JobApplication["status"]) || "submitted",
+    aiScore: a.ai_score ?? null,
+    aiReasoning: a.ai_reasoning || null,
+    aiAnalyzedAt: a.ai_analyzed_at || null,
+    createdAt: a.created_at,
+  };
+}
+
+// Applications are only ever INSERTed via /api/jobs/apply (service-role key, AI-credit spend must be
+// server-verified) — storage.ts only reads and updates status from here.
+export async function loadApplicationsForCandidate(userId: string): Promise<JobApplication[]> {
+  const { data } = await supabase
+    .from("automailsend_job_applications")
+    .select("*")
+    .eq("candidate_id", userId)
+    .order("created_at", { ascending: false });
+  return (data || []).map(mapJobApplicationRow);
+}
+
+export async function loadApplicationsForPosting(jobId: string): Promise<JobApplication[]> {
+  const { data } = await supabase
+    .from("automailsend_job_applications")
+    .select("*")
+    .eq("job_id", jobId)
+    .order("created_at", { ascending: false });
+  return (data || []).map(mapJobApplicationRow);
+}
+
+export async function updateApplicationStatus(id: string, status: JobApplication["status"]) {
+  const { error } = await supabase
+    .from("automailsend_job_applications")
+    .update({ status })
+    .eq("id", id);
+  if (error) throw error;
 }

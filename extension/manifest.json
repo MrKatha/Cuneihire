@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Automail LinkedIn Cookie Extractor",
+  "name": "Cuneihire LinkedIn Cookie Extractor",
   "version": "1.0",
-  "description": "Automatically extracts your LinkedIn JSESSIONID for the Automail application.",
+  "description": "Automatically extracts your LinkedIn JSESSIONID for the Cuneihire application.",
   "permissions": [
     "cookies"
   ],

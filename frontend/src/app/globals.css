@@ -1,17 +1,17 @@
 @import "tailwindcss";
 
 :root {
-  --bg: #f8fafc;
+  --bg: #faf9f6;
   --bg-elevated: #ffffff;
   --bg-panel: #ffffff;
-  --ink: #0f172a;
-  --muted: #64748b;
-  --line: #e2e8f0;
-  --accent: #2563eb;
+  --ink: #16140f;
+  --muted: #7a7568;
+  --line: #e5e1d6;
+  --accent: #c9520e;
   --accent-ink: #ffffff;
-  --warn: #f59e0b;
-  --danger: #ef4444;
-  --ok: #10b981;
+  --warn: #c8960e;
+  --danger: #b23a4a;
+  --ok: #1e8a5c;
 }
 
 @theme inline {
@@ -44,11 +44,11 @@ html::-webkit-scrollbar {
 }
 *::-webkit-scrollbar-track {
   background: rgba(0, 0, 0, 0.1);
-  border-radius: 4px;
+  border-radius: 999px;
 }
 *::-webkit-scrollbar-thumb {
   background: var(--line);
-  border-radius: 4px;
+  border-radius: 999px;
 }
 *::-webkit-scrollbar-thumb:hover {
   background: var(--muted);
@@ -62,18 +62,6 @@ body {
   font-family: var(--font-sans), system-ui, sans-serif;
   background: var(--bg);
   font-size: 13px;
-}
-
-body::before {
-  content: "";
-  position: fixed;
-  inset: 0;
-  z-index: -1;
-  pointer-events: none;
-  background:
-    radial-gradient(ellipse 80% 50% at 10% -10%, #bfdbfe 0%, transparent 55%),
-    radial-gradient(ellipse 60% 40% at 100% 0%, #dbeafe 0%, transparent 50%),
-    var(--bg);
 }
 
 .page {
@@ -112,7 +100,7 @@ body::before {
   font-size: clamp(1.15rem, 2.2vw, 1.45rem);
   font-weight: 600;
   letter-spacing: -0.02em;
-  color: var(--accent);
+  color: var(--ink);
   line-height: 1;
 }
 
@@ -121,6 +109,21 @@ body::before {
   color: var(--muted);
   font-size: 0.78rem;
   line-height: 1.2;
+}
+
+/* Tracked-uppercase mono label — the eyebrow/tag convention used app-wide
+   above section headers, panel titles, and system strings. */
+.label-eyebrow {
+  font-family: var(--font-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.66rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: var(--muted);
+}
+
+.label-eyebrow.accent {
+  color: var(--accent);
 }
 
 .board {
@@ -150,8 +153,8 @@ body::before {
   flex-wrap: wrap;
   padding: 0.35rem 0.5rem;
   border: 1px solid var(--line);
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--bg-panel) 88%, transparent);
+  border-radius: 10px;
+  background: var(--bg-panel);
   min-width: min(100%, 320px);
 }
 
@@ -204,7 +207,6 @@ body::before {
   justify-content: center;
   padding: 1rem;
   background: color-mix(in srgb, #000 55%, transparent);
-  backdrop-filter: blur(4px);
   animation: fadeIn 0.2s ease-out forwards;
 }
 
@@ -213,10 +215,10 @@ body::before {
   max-height: min(95vh, 800px);
   overflow: auto;
   border: 1px solid var(--line);
-  border-radius: 12px;
+  border-radius: 16px;
   background: var(--bg-panel);
   padding: 0.9rem 1rem 1rem;
-  box-shadow: 0 18px 50px color-mix(in srgb, #000 45%, transparent);
+  box-shadow: 0 18px 50px color-mix(in srgb, #000 20%, transparent);
   scrollbar-width: none;
   animation: slideUp 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
@@ -257,9 +259,8 @@ body::before {
   height: auto;
   padding: 0.7rem 0.75rem 0.75rem;
   border: 1px solid var(--line);
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--bg-panel) 88%, transparent);
-  backdrop-filter: blur(8px);
+  border-radius: 14px;
+  background: var(--bg-panel);
   display: flex;
   flex-direction: column;
   overflow: visible;
@@ -339,7 +340,7 @@ body::before {
   width: 100%;
   padding: 0.35rem 0.45rem;
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: 8px;
   background: var(--bg-elevated);
   color: var(--ink);
   font: inherit;
@@ -401,7 +402,7 @@ body::before {
 .field textarea:focus,
 .recipient-list select:focus,
 .recipient-list .title-inline:focus {
-  outline: 1px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  outline: 1px solid var(--accent);
   outline-offset: 0;
 }
 
@@ -440,7 +441,7 @@ body::before {
   justify-content: center;
   padding: 0.35rem 0.65rem;
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: 8px;
   background: var(--bg-elevated);
   color: var(--ink);
   font: inherit;
@@ -448,10 +449,11 @@ body::before {
   font-weight: 550;
   cursor: pointer;
   white-space: nowrap;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
 }
 
 .btn:hover:not(:disabled) {
-  border-color: color-mix(in srgb, var(--accent) 50%, var(--line));
+  border-color: var(--ink);
 }
 
 .btn:disabled {
@@ -466,7 +468,7 @@ body::before {
 }
 
 .btn.primary:hover:not(:disabled) {
-  filter: brightness(1.05);
+  filter: brightness(1.08);
 }
 
 .btn.large {
@@ -506,7 +508,7 @@ body::before {
 .chip {
   display: inline-flex;
   padding: 0.12rem 0.4rem;
-  border-radius: 5px;
+  border-radius: 999px;
   background: var(--bg-elevated);
   border: 1px solid var(--line);
   font-size: 0.65rem;
@@ -564,7 +566,7 @@ body::before {
   min-height: 4rem;
   max-height: min(65vh, 650px);
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: 10px;
   padding: 0.35rem;
   background: var(--bg-elevated);
   scrollbar-width: none;
@@ -673,7 +675,7 @@ body::before {
   align-items: center;
   padding: 0.28rem 0.35rem;
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: 8px;
   background: var(--bg-elevated);
   flex: 0 0 auto;
 }
@@ -689,7 +691,7 @@ body::before {
 .template-card {
   padding: 0.45rem;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: 10px;
   background: var(--bg-elevated);
   display: flex;
   flex-direction: column;
@@ -777,7 +779,7 @@ body::before {
   max-height: min(70vh, 640px);
   overflow: auto;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: 10px;
   background: var(--bg);
   padding: 0.5rem;
   scrollbar-width: thin;
@@ -797,8 +799,56 @@ body::before {
   width: 100%;
   height: min(65vh, 600px);
   border: 0;
-  border-radius: 6px;
+  border-radius: 8px;
   background: #fff;
+}
+
+/* "Preview as PDF" (2026-08-25, third same-day follow-up — see PdfPreviewModal.tsx's header comment) — a
+   big, one-page-at-a-time preview mirroring ResumeBuilder.tsx's own live preview, deliberately much bigger
+   than the generic .preview-modal defaults above (those were sized for a small image/text/iframe check,
+   not "cover almost the whole height of the screen" for a full A4 page). Width stays modest — a resume
+   page is tall and narrow, not wide — height is the dimension that actually needs the room. */
+.pdf-preview-modal {
+  width: min(760px, 94vw);
+  height: 95vh;
+  max-height: 95vh;
+}
+
+/* The available space the fixed-size page window (below) fits itself into via `zoom` — same idea as
+   ResumeBuilder.tsx's own previewViewportRef. overflow:auto is a defensive fallback (same precedent as
+   that file's own comment on the same pattern), not the normal case — fitScale is meant to always shrink
+   the page to fit here with room to spare. */
+.pdf-preview-stack {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--bg);
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--accent) 50%, var(--line)) var(--bg-elevated);
+}
+
+/* Fresh names, not ResumeBuilder.tsx's .resume-print-area/.resume-print-clip — see this file's own header
+   comment for why (those are targeted by name in globals.css's @media print block). */
+.pdf-preview-page-frame {
+  background: #fff;
+  box-shadow: 0 2px 10px color-mix(in srgb, #000 18%, transparent);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  /* A flat visual, not an editable document — no text selection, no cursor affordance. */
+  pointer-events: none;
+  user-select: none;
+}
+
+.pdf-preview-page-clip {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .preview-text {
@@ -806,7 +856,7 @@ body::before {
   padding: 0.5rem;
   white-space: pre-wrap;
   word-break: break-word;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-family: var(--font-mono), ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 0.75rem;
   line-height: 1.45;
   color: var(--ink);
@@ -888,7 +938,7 @@ body::before {
   gap: 0.25rem;
   padding: 0.35rem 0.4rem;
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: 8px;
   background: var(--bg-elevated);
   color: var(--muted);
   font: inherit;
@@ -973,7 +1023,7 @@ body::before {
   justify-content: space-between;
   gap: 0.5rem;
   padding: 0.28rem 0.4rem;
-  border-radius: 6px;
+  border-radius: 8px;
   border: 1px solid var(--line);
   font-size: 0.7rem;
 }
@@ -1082,6 +1132,59 @@ body::before {
   color: var(--accent-ink);
 }
 
+/* HoverHint (2026-08-19) — pure-CSS hover popover, distinct from HelpTooltip's click-to-open modal. */
+.hover-hint {
+  position: relative;
+  display: inline-flex;
+  vertical-align: middle;
+}
+.hover-hint-panel {
+  position: absolute;
+  top: 130%;
+  left: 0;
+  z-index: 50;
+  width: 260px;
+  padding: 0.6rem 0.7rem;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--bg-elevated);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
+  font-size: 0.76rem;
+  line-height: 1.5;
+  color: var(--fg);
+  text-align: left;
+  font-weight: 400;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-4px);
+  transition: opacity 0.15s ease, transform 0.15s ease, visibility 0.15s;
+  pointer-events: none;
+}
+.hover-hint:hover .hover-hint-panel,
+.hover-hint:focus-within .hover-hint-panel {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+
+/* The logged-in dashboard is meant to be a fixed, non-scrolling 100vh shell (see .app-container below) with
+   only its own internal panes (.main-content, and inside Resumes, the editor column) scrolling — but
+   layout.tsx's <footer> (the marketing-page copyright/disclaimer bar) is a permanent sibling of {children}
+   in every route, logged-in or not. On the marketing pages (no .app-container) that's correct — normal
+   document flow, footer pinned to the bottom of natural content height. Once .app-container is mounted
+   though, its own fixed height (100vh) plus the footer's height together exceed the viewport, and since
+   nothing declares html/body overflow-y:hidden, the whole DOCUMENT becomes scrollable on top of
+   .app-container's own internal scrolling (2026-08-24, bug fix — "the page is not scrolling [right], in the
+   middle it's suspended": scrolling anywhere outside the two intentionally-scrollable panes — e.g. the
+   sidebar, the role-tabs row, the resume preview column — scrolled the whole app shell instead of doing
+   nothing, sliding the sidebar/header off the top and revealing this footer underneath, which is exactly
+   the "stuck partway, header missing" feeling being described). Scoped via :has() rather than touching
+   html/body globally, so marketing-page scrolling is completely unaffected.  */
+body:has(.app-container) footer {
+  display: none;
+}
+
 .app-container {
   display: flex;
   height: 100vh;
@@ -1098,13 +1201,50 @@ body::before {
   display: flex;
   flex-direction: column;
   gap: 1rem;
+  overflow: hidden;
+  flex-shrink: 0;
+  transition: width 0.18s ease, padding 0.18s ease, opacity 0.15s ease;
+}
+
+/* Collapsible sidebar (2026-08-20) — width collapses to 0 rather than an icon-only rail, since the nav
+   entries have no icon set today; the always-visible .sidebar-toggle (a flex sibling, not inside .sidebar
+   itself) is what re-expands it. */
+.sidebar.collapsed {
+  width: 0;
+  padding-left: 0;
+  padding-right: 0;
+  opacity: 0;
+  border-right: none;
+}
+
+.sidebar-toggle {
+  flex: 0 0 auto;
+  width: 18px;
+  align-self: stretch;
+  border: none;
+  border-right: 1px solid var(--line);
+  background: var(--bg-panel);
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 0.9rem;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.sidebar-toggle:hover {
+  background: var(--bg);
+  color: var(--ink);
 }
 
 .sidebar-title {
   font-family: var(--font-display), Georgia, serif;
   font-size: 1.25rem;
   font-weight: 600;
-  color: var(--accent);
+  color: var(--ink);
   margin-bottom: 1rem;
   padding-left: 0.5rem;
 }
@@ -1129,13 +1269,14 @@ body::before {
 }
 
 .sidebar-tab:hover {
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--bg);
   color: var(--ink);
 }
 
 .sidebar-tab.active {
-  background: var(--line);
-  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--ink);
+  font-weight: 650;
 }
 
 .main-content {
@@ -1174,4 +1315,97 @@ input[type="number"]::-webkit-inner-spin-button {
 }
 input[type="number"] {
   -moz-appearance: textfield;
+}
+
+/* Resume Builder (2026-08-18) — sizes the live preview to an actual A4 page and, on print, hides
+   everything else on the page so "Download PDF" (window.print()) captures only the resume. The
+   "capture this exact element" trick: make everything invisible, then re-show just the print area and
+   pop it out of the document flow to the top-left so it isn't offset by whatever scrolled position the
+   rest of the (now-invisible) page was in.
+   Sizing/padding moved to an inline style (2026-08-20, page-window rewrite) — ResumeBuilder.tsx now always
+   sets width/height/padding/zoom directly (driven by the resume's own style settings and the fit-to-
+   viewport calculation), so this class only supplies the chrome that never varies: background/shadow/
+   centering. */
+.resume-print-area {
+  background: #fff;
+  box-shadow: 0 4px 24px color-mix(in srgb, #000 15%, transparent);
+  margin: 0 auto;
+}
+
+@media print {
+  /* .app-container is a fixed 100vh with overflow:hidden and .main-content scrolls internally — both
+     are the app's normal-mode scroll shell, but during print they stay in the DOM (only visibility is
+     toggled below) and their fixed height/hidden overflow clipped anything taller than one screen, which
+     is what made multi-section resumes print as a single truncated sheet instead of paginating. Print
+     doesn't need a viewport-height shell at all, so let both grow to their natural content height. */
+  .app-container {
+    height: auto !important;
+    overflow: visible !important;
+  }
+  .main-content {
+    overflow: visible !important;
+  }
+  body * {
+    visibility: hidden;
+  }
+  .resume-print-area,
+  .resume-print-area * {
+    visibility: visible;
+  }
+  .resume-print-area {
+    /* Three resets now, not one (2026-08-20, page-window rewrite) — the live preview gained two more
+       on-screen-only mechanisms since this block was first written, and each needs its own undo or the
+       printed output silently clips or offsets instead of pausing the whole preview:
+       (1) `zoom` (the dynamic fit-to-viewport shrink, replacing the old fixed transform:scale(0.82) this
+       comment used to describe) — a zoomed/transformed element is otherwise treated as one flattened
+       layer for print, which is the same reason long resumes wouldn't paginate before this whole feature
+       existed;
+       (2) the fixed one-page width/height + overflow:hidden (the "page window" that shows one page on
+       screen) — print needs the *full* natural content size and normal flow so the browser's own
+       pagination can do its job across as many pages as the content needs, not just whichever one page
+       was on screen;
+       (3) see .resume-print-content below for the third (the translateY page-scroll offset). */
+    zoom: 1 !important;
+    transform: none !important;
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: auto !important;
+    min-height: 0;
+    overflow: visible !important;
+    box-shadow: none;
+    margin: 0;
+  }
+  /* Undoes previewContentRef's on-screen translateY (2026-08-20) — that shift reveals only the current
+     page in the fixed-size window above; print needs the full, untranslated content instead, or the
+     printed output would be vertically offset by whatever page happened to be selected on screen. */
+  .resume-print-content {
+    transform: none !important;
+  }
+  /* Undoes the page-break bug fix's clip window (2026-08-20) — .resume-print-area's own top/bottom padding
+     became fixed spacer divs either side of this element so nothing could bleed into them on screen (see
+     ResumeBuilder.tsx's comment on .resume-print-area); this element's own overflow:hidden + flex-based
+     one-page height need the same reset as .resume-print-area itself, or print would still only show one
+     page's worth of content. */
+  .resume-print-clip {
+    overflow: visible !important;
+    flex: none !important;
+    min-height: 0 !important;
+  }
+  /* Undoes the second page-break bug fix's per-page slice height (2026-08-20) — .resume-print-clip's own
+     child is deliberately shorter than a full page whenever a page ends early (see ResumeBuilder.tsx's
+     thisPageContentPx comment); print wants the full, unsliced content again, same reasoning as the two
+     resets above. */
+  .resume-print-page-slice {
+    height: auto !important;
+    overflow: visible !important;
+  }
+  .no-print {
+    display: none !important;
+  }
+  @page {
+    size: A4;
+    margin: 0;
+  }
 }

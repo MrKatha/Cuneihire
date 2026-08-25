@@ -4,6 +4,7 @@ const { processJob } = require("./workers/scraper.worker");
 const { runAutomailJobs } = require("./workers/automail.worker");
 
 const { processBatchSendJob } = require("./workers/batchSend.worker");
+const { processReplyPollJob } = require("./workers/replyPoll.worker");
 const { getGlobalSettings } = require("./lib/globalSettings");
 
 const lastQueuedMap = new Map();
@@ -78,6 +79,22 @@ function startScheduler() {
       isBatchRunning = false;
     }
   }, batchTickSec * 1000);
+
+  const replyPollTickSec = process.env.REPLY_POLL_INTERVAL_SEC ? parseInt(process.env.REPLY_POLL_INTERVAL_SEC, 10) : 300;
+  console.log(pc.green(`🚀 Starting Reply Poll Worker (checking every ${replyPollTickSec} seconds)...`));
+  let isReplyPollRunning = false;
+  setInterval(async () => {
+    if (isReplyPollRunning) return;
+    isReplyPollRunning = true;
+    console.log(pc.dim(`[ReplyPoll Worker] Checking IMAP-enabled mailboxes for replies...`));
+    try {
+      await processReplyPollJob(supabase);
+    } catch (err) {
+      console.error(pc.red(`[Scheduler] Reply poll worker error: ${err.message}`));
+    } finally {
+      isReplyPollRunning = false;
+    }
+  }, replyPollTickSec * 1000);
 
   setInterval(async () => {
     // or just log it so the user knows it's checking.

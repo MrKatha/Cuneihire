@@ -5,8 +5,13 @@ import { supabase } from "@/lib/supabase";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Eye, EyeOff, ArrowLeft } from "lucide-react";
+import HexMark from "@/components/ui/HexMark";
+import { isCompanyEmail } from "@/lib/companyEmail";
+
+type AccountType = "candidate" | "recruiter";
 
 export default function SignUpPage() {
+  const [accountType, setAccountType] = useState<AccountType>("candidate");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -43,16 +48,30 @@ export default function SignUpPage() {
       return;
     }
 
+    // Recruiter accounts need a real company email — one email is locked to one account type for
+    // good, so this can't be fixed later from inside the app. See docs/architecture.md's "Recruiter
+    // portal" section.
+    if (accountType === "recruiter" && !isCompanyEmail(email)) {
+      setError("Recruiter accounts require a company email address — personal providers like Gmail, Yahoo, or Outlook aren't accepted.");
+      setLoading(false);
+      return;
+    }
+
     const { error } = await supabase.auth.signUp({
       email,
       password,
+      options: { data: { account_type: accountType } },
     });
 
     if (error) {
       setError(error.message);
       setLoading(false);
     } else {
-      setSuccess("Account created successfully! You can now log in.");
+      setSuccess(
+        accountType === "recruiter"
+          ? "Recruiter account created! You can now log in and start posting jobs."
+          : "Account created successfully! You can now log in."
+      );
       setLoading(false);
       // Optional: automatically redirect to login after a few seconds
       setTimeout(() => router.push("/login"), 3000);
@@ -61,18 +80,18 @@ export default function SignUpPage() {
 
   return (
     <main className="flex items-center justify-center p-4 w-full h-full my-auto flex-grow relative">
-      <Link href="/" className="absolute top-6 left-6 md:top-10 md:left-10 flex items-center gap-2 text-sm font-medium text-gray-500 hover:text-gray-900 transition-colors">
+      <Link href="/" className="absolute top-6 left-6 md:top-10 md:left-10 flex items-center gap-2 text-sm font-medium transition-colors" style={{ color: 'var(--muted)' }}>
         <ArrowLeft size={16} /> Back to Home
       </Link>
-      <div className="w-full max-w-md p-8 bg-[var(--bg-panel)] rounded-2xl border border-[var(--line)] shadow-2xl backdrop-blur-md">
+      <div className="w-full max-w-md p-8 bg-[var(--bg-panel)] border border-[var(--line)]">
         <Link href="/" className="text-center mb-8 flex flex-col items-center hover:opacity-80 transition-opacity block">
-          <img src="/logo.png" alt="Viddr Logo" className="w-12 h-12 rounded-xl mb-4 shadow-sm" />
-          <h1 className="text-3xl font-bold text-gray-900 mb-2 tracking-tight">Viddr</h1>
+          <HexMark variant="outline" size={48} className="mb-4" />
+          <h1 className="text-3xl font-bold mb-2 tracking-tight" style={{ color: 'var(--ink)', fontFamily: 'var(--font-display), Georgia, serif' }}>Cuneihire</h1>
         </Link>
         <p className="text-[var(--muted)] text-center mb-6">Create your account to get started.</p>
 
         {allowSignups === false ? (
-          <div className="p-6 bg-[var(--danger-dim)] text-[var(--danger)] rounded-xl text-center border border-[var(--danger)] border-opacity-20">
+          <div className="p-6 bg-[var(--danger-dim)] text-[var(--danger)] text-center border border-[var(--danger)] border-opacity-20">
             <h3 className="font-bold text-lg mb-2">Signups Closed</h3>
             <p className="text-sm opacity-90">
               We are not accepting new accounts at this time. Please check back later or contact the administrator.
@@ -80,6 +99,32 @@ export default function SignUpPage() {
           </div>
         ) : (
           <form onSubmit={handleSignUp} className="space-y-5">
+          <div className="field">
+            <span>I&apos;m signing up as a…</span>
+            <div style={{ display: "flex", gap: "0.5rem", marginTop: "0.35rem" }}>
+              <button
+                type="button"
+                className={`btn ${accountType === "candidate" ? "primary" : "ghost"}`}
+                style={{ flex: 1, justifyContent: "center" }}
+                onClick={() => setAccountType("candidate")}
+              >
+                Candidate
+              </button>
+              <button
+                type="button"
+                className={`btn ${accountType === "recruiter" ? "primary" : "ghost"}`}
+                style={{ flex: 1, justifyContent: "center" }}
+                onClick={() => setAccountType("recruiter")}
+              >
+                Recruiter
+              </button>
+            </div>
+            <p className="hint compact" style={{ marginTop: "0.35rem" }}>
+              {accountType === "recruiter"
+                ? "Recruiter accounts need a company email — this can't be changed later."
+                : "One email is one account type for good — sign up separately for a recruiter account."}
+            </p>
+          </div>
           <label className="field">
             <span>Email</span>
             <input

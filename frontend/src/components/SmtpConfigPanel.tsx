@@ -2,14 +2,16 @@
 
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
-import type { SmtpConfig } from "@/lib/types";
+import type { SmtpAccount } from "@/lib/types";
 import toast from "react-hot-toast";
-import { supabase } from "@/lib/supabase";
 import { HelpTooltip } from "./HelpTooltip";
 
 type Props = {
-  config: SmtpConfig;
-  onChange: (config: SmtpConfig) => void;
+  accounts: SmtpAccount[];
+  onSaveAccount: (
+    account: Partial<SmtpAccount> & { id?: string; email: string; appPassword: string }
+  ) => Promise<SmtpAccount | null>;
+  onDeleteAccount: (id: string) => Promise<void>;
   onResetAll: () => void;
   onClose: () => void;
 };
@@ -23,39 +25,31 @@ const PROVIDERS = [
 
 const SANITIZE_REGEX = /[^a-zA-Z0-9!@#$%^&*()_+\-=[\]{};':"\\|,.<>/? ]/g;
 
-export function SmtpConfigPanel({ config, onChange, onResetAll, onClose }: Props) {
-  const [email, setEmail] = useState(config.email);
-  const [fromEmail, setFromEmail] = useState(config.fromEmail || "");
-  const [fromName, setFromName] = useState(config.fromName || "");
-  const [appPassword, setAppPassword] = useState(config.appPassword);
-  
-  const [provider, setProvider] = useState(config.provider || "gmail");
-  const [host, setHost] = useState(config.host || "smtp.gmail.com");
-  const [port, setPort] = useState(config.port || 465);
+export function SmtpConfigPanel({ accounts, onSaveAccount, onDeleteAccount, onResetAll, onClose }: Props) {
+  const [mounted, setMounted] = useState(false);
+  const [view, setView] = useState<"list" | "form">(accounts.length === 0 ? "form" : "list");
+  const [editingId, setEditingId] = useState<string | undefined>(undefined);
+
+  const [label, setLabel] = useState("");
+  const [email, setEmail] = useState("");
+  const [fromEmail, setFromEmail] = useState("");
+  const [fromName, setFromName] = useState("");
+  const [appPassword, setAppPassword] = useState("");
+  const [provider, setProvider] = useState("gmail");
+  const [host, setHost] = useState("smtp.gmail.com");
+  const [port, setPort] = useState(465);
+  const [dailyLimit, setDailyLimit] = useState(50);
+  const [imapEnabled, setImapEnabled] = useState(false);
+  const [imapHost, setImapHost] = useState("");
+  const [imapPort, setImapPort] = useState(993);
 
   const [showPassword, setShowPassword] = useState(false);
-  const [editing, setEditing] = useState(!config.configured);
   const [loading, setLoading] = useState(false);
-  const [message, setMessage] = useState<{
-    type: "ok" | "err";
-    text: string;
-  } | null>(null);
-
-  const [mounted, setMounted] = useState(false);
+  const [message, setMessage] = useState<{ type: "ok" | "err"; text: string } | null>(null);
 
   useEffect(() => {
     setMounted(true);
-    setTimeout(() => {
-      setEmail(config.email);
-      setFromEmail(config.fromEmail || "");
-      setFromName(config.fromName || "");
-      setAppPassword(config.appPassword);
-      setProvider(config.provider || "gmail");
-      setHost(config.host || "smtp.gmail.com");
-      setPort(config.port || 465);
-      setEditing(!config.configured);
-    }, 0);
-  }, [config]);
+  }, []);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -65,22 +59,68 @@ export function SmtpConfigPanel({ config, onChange, onResetAll, onClose }: Props
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  const locked = config.configured && !editing;
-  const displayAppPassword = appPassword.startsWith("enc:") ? "����������������" : appPassword;
-  
-  const currentProvider = PROVIDERS.find(p => p.id === provider) || PROVIDERS[0];
+  const currentProvider = PROVIDERS.find((p) => p.id === provider) || PROVIDERS[0];
+  const displayAppPassword = appPassword.startsWith("enc:") ? "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022" : appPassword;
+
+  function resetForm() {
+    setEditingId(undefined);
+    setLabel("");
+    setEmail("");
+    setFromEmail("");
+    setFromName("");
+    setAppPassword("");
+    setProvider("gmail");
+    setHost("smtp.gmail.com");
+    setPort(465);
+    setDailyLimit(50);
+    setImapEnabled(false);
+    setImapHost("");
+    setImapPort(993);
+    setShowPassword(false);
+    setMessage(null);
+  }
+
+  function openAddForm() {
+    resetForm();
+    setView("form");
+  }
+
+  function openEditForm(a: SmtpAccount) {
+    setEditingId(a.id);
+    setLabel(a.label);
+    setEmail(a.email);
+    setFromEmail(a.fromEmail);
+    setFromName(a.fromName);
+    setAppPassword(a.appPassword);
+    setProvider(a.provider);
+    setHost(a.host);
+    setPort(a.port);
+    setDailyLimit(a.dailyLimit);
+    setImapEnabled(a.imapEnabled);
+    setImapHost(a.imapHost || "");
+    setImapPort(a.imapPort || 993);
+    setMessage(null);
+    setView("form");
+  }
 
   function handleProviderChange(e: React.ChangeEvent<HTMLSelectElement>) {
     const val = e.target.value;
     setProvider(val);
-    const p = PROVIDERS.find(x => x.id === val);
+    const p = PROVIDERS.find((x) => x.id === val);
     if (p && p.id !== "custom") {
       setHost(p.host);
       setPort(p.port);
     }
+    // Relay-only providers (SendGrid/Resend) have no real inbox to poll — never leave reply
+    // monitoring silently enabled for one of these.
+    if (val === "sendgrid" || val === "resend") {
+      setImapEnabled(false);
+    }
   }
 
-  async function handleVerify() {
+  const canMonitorReplies = provider !== "sendgrid" && provider !== "resend";
+
+  async function handleVerifyAndSave() {
     setLoading(true);
     setMessage(null);
     try {
@@ -95,23 +135,32 @@ export function SmtpConfigPanel({ config, onChange, onResetAll, onClose }: Props
         toast.error(data.error || "Verification failed");
         return;
       }
-      
-      // ONLY trigger onChange (which saves) upon successful verify!
-      const isMasked = appPassword.startsWith("enc:");
-      onChange({ 
-        email: email.trim(),
-        appPassword: isMasked ? config.appPassword : appPassword.trim(),
-        fromEmail: fromEmail.trim(),
-        fromName: fromName.trim(),
+
+      const saved = await onSaveAccount({
+        id: editingId,
+        label: label.trim() || email.trim(),
         provider,
+        email: email.trim(),
+        appPassword: data.encryptedPassword,
         host,
         port,
-        configured: true 
+        fromEmail: fromEmail.trim(),
+        fromName: fromName.trim(),
+        dailyLimit,
+        isVerified: true,
+        isActive: true,
+        imapEnabled: canMonitorReplies && imapEnabled,
+        imapHost: imapHost.trim() || undefined,
+        imapPort,
       });
-      setEditing(false);
-      setMessage({ type: "ok", text: "Verified" });
-      toast.success("SMTP config verified!");
-      onClose();
+      if (!saved) {
+        toast.error("Verified, but failed to save the account. Please try again.");
+        return;
+      }
+
+      toast.success(editingId ? "Account updated!" : "Account added!");
+      resetForm();
+      setView("list");
     } catch {
       setMessage({ type: "err", text: "Network error" });
       toast.error("Network error during verification");
@@ -120,72 +169,106 @@ export function SmtpConfigPanel({ config, onChange, onResetAll, onClose }: Props
     }
   }
 
-  function handleChangeSettings() {
-    setEditing(true);
-    // Don't call onChange here so we don't clear the DB credentials until verified
-    setMessage({ type: "ok", text: "Edit then verify" });
+  async function handleDelete(a: SmtpAccount) {
+    if (!window.confirm(`Remove "${a.label || a.email}"? Sending will stop using this mailbox.`)) return;
+    await onDeleteAccount(a.id);
+    toast.success("Account removed.");
   }
 
   function handleReset() {
     if (
       !window.confirm(
-        "Reset all settings? Clears SMTP, recipients, templates, and delay."
+        "Reset all settings? Clears recipients, templates, and delay. SMTP accounts are kept — remove them individually if you want those gone too."
       )
     ) {
       return;
     }
     onResetAll();
-    setEmail("");
-    setFromEmail("");
-    setFromName("");
-    setAppPassword("");
-    setProvider("gmail");
-    setHost("smtp.gmail.com");
-    setPort(465);
-    setEditing(true);
-    setShowPassword(false);
-    setMessage({ type: "ok", text: "Reset done" });
     toast.success("All settings have been reset.");
   }
 
   if (!mounted) return null;
 
   return createPortal(
-        <div
-          className="modal-backdrop"
-          role="presentation"
-          onClick={() => config.configured && onClose()}
-          style={{ zIndex: 99999 }}
-        >
-          <div
-            className="modal-card"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="smtp-modal-title"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="modal-head">
-              <div>
-                <h2 id="smtp-modal-title">SMTP settings</h2>
-                <p className="hint compact">
-                  Connect your email provider to send emails
-                </p>
-              </div>
-              <button
-                type="button"
-                className="btn ghost"
-                onClick={onClose}
-              >
-                Close
-              </button>
-            </div>
+    <div className="modal-backdrop" role="presentation" onClick={onClose} style={{ zIndex: 99999 }}>
+      <div
+        className="modal-card"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="smtp-modal-title"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="modal-head">
+          <div>
+            <h2 id="smtp-modal-title">SMTP accounts</h2>
+            <p className="hint compact">
+              Add one or more mailboxes — sends spread across them, each capped at its own daily limit.
+            </p>
+          </div>
+          <button type="button" className="btn ghost" onClick={onClose}>
+            Close
+          </button>
+        </div>
 
-            <div className="modal-body">
+        <div className="modal-body">
+          {view === "list" && (
+            <>
+              {accounts.length === 0 ? (
+                <p className="hint">No SMTP accounts yet — add one to start sending.</p>
+              ) : (
+                <ul className="file-list tall" style={{ marginBottom: "1rem" }}>
+                  {accounts.map((a) => (
+                    <li key={a.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "0.75rem" }}>
+                      <div>
+                        <div style={{ fontWeight: 500 }}>{a.label || a.email}</div>
+                        <div className="hint compact">
+                          {a.email} · {a.dailyLimit}/day ·{" "}
+                          <span className={a.isVerified ? "msg ok" : "msg err"}>
+                            {a.isVerified ? "Verified" : "Not verified"}
+                          </span>
+                          {!a.isActive && " · Paused"}
+                        </div>
+                      </div>
+                      <span style={{ display: "flex", gap: "0.4rem", flex: "none" }}>
+                        <button type="button" className="btn ghost" onClick={() => openEditForm(a)}>
+                          Edit
+                        </button>
+                        <button type="button" className="btn ghost danger" onClick={() => handleDelete(a)}>
+                          Remove
+                        </button>
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <div className="row">
+                <button type="button" className="btn primary" onClick={openAddForm} id="tour-smtp-add">
+                  + Add account
+                </button>
+                <button type="button" className="btn ghost danger" onClick={handleReset}>
+                  Reset all
+                </button>
+              </div>
+            </>
+          )}
+
+          {view === "form" && (
+            <>
               <div className="grid-2">
                 <label className="field" style={{ gridColumn: "1 / -1" }}>
+                  <span>Label (optional)</span>
+                  <input
+                    type="text"
+                    value={label}
+                    onChange={(e) => setLabel(e.target.value)}
+                    placeholder="e.g. Primary Gmail"
+                  />
+                </label>
+
+                <label className="field" style={{ gridColumn: "1 / -1" }}>
                   <span>Provider</span>
-                  <select value={provider} onChange={handleProviderChange} disabled={locked}>
-                    {PROVIDERS.map(p => (
+                  <select value={provider} onChange={handleProviderChange}>
+                    {PROVIDERS.map((p) => (
                       <option key={p.id} value={p.id}>{p.name}</option>
                     ))}
                   </select>
@@ -198,11 +281,7 @@ export function SmtpConfigPanel({ config, onChange, onResetAll, onClose }: Props
                       <input
                         type="text"
                         value={host}
-                        disabled={locked}
-                        onChange={(e) => {
-                          setHost(e.target.value);
-                          setMessage(null);
-                        }}
+                        onChange={(e) => { setHost(e.target.value); setMessage(null); }}
                         placeholder="smtp.example.com"
                       />
                     </label>
@@ -211,11 +290,7 @@ export function SmtpConfigPanel({ config, onChange, onResetAll, onClose }: Props
                       <input
                         type="number"
                         value={port}
-                        disabled={locked}
-                        onChange={(e) => {
-                          setPort(parseInt(e.target.value, 10));
-                          setMessage(null);
-                        }}
+                        onChange={(e) => { setPort(parseInt(e.target.value, 10)); setMessage(null); }}
                         placeholder="465"
                       />
                     </label>
@@ -227,11 +302,7 @@ export function SmtpConfigPanel({ config, onChange, onResetAll, onClose }: Props
                   <input
                     type="email"
                     value={fromEmail}
-                    disabled={locked}
-                    onChange={(e) => {
-                      setFromEmail(e.target.value);
-                      setMessage(null);
-                    }}
+                    onChange={(e) => { setFromEmail(e.target.value); setMessage(null); }}
                     placeholder={email || "e.g. mail@example.com"}
                   />
                 </label>
@@ -241,11 +312,7 @@ export function SmtpConfigPanel({ config, onChange, onResetAll, onClose }: Props
                   <input
                     type="text"
                     value={fromName}
-                    disabled={locked}
-                    onChange={(e) => {
-                      setFromName(e.target.value);
-                      setMessage(null);
-                    }}
+                    onChange={(e) => { setFromName(e.target.value); setMessage(null); }}
                     placeholder="e.g. John Doe"
                   />
                 </label>
@@ -256,21 +323,17 @@ export function SmtpConfigPanel({ config, onChange, onResetAll, onClose }: Props
                     id="tour-smtp-email"
                     type="text"
                     value={email}
-                    disabled={locked}
-                    onChange={(e) => {
-                      setEmail(e.target.value);
-                      setMessage(null);
-                    }}
-                    placeholder={provider === 'gmail' ? "you@gmail.com" : ""}
+                    onChange={(e) => { setEmail(e.target.value); setMessage(null); }}
+                    placeholder={provider === "gmail" ? "you@gmail.com" : ""}
                   />
                 </label>
 
                 <label className="field">
                   <span>
                     {currentProvider.passLabel}
-                    {provider === 'gmail' && (
-                      <HelpTooltip 
-                        title="Google App Password" 
+                    {provider === "gmail" && (
+                      <HelpTooltip
+                        title="Google App Password"
                         content={
                           <>
                             <p>To let this app send emails on your behalf, you need a <strong>Google App Password</strong>.</p>
@@ -279,11 +342,11 @@ export function SmtpConfigPanel({ config, onChange, onResetAll, onClose }: Props
                               <li>Go to your Google Account Settings.</li>
                               <li>Turn on <strong>2-Step Verification</strong> if it isn't already.</li>
                               <li>Search for "App Passwords" in your account settings.</li>
-                              <li>Create a new app password (name it "AutoMailSend") and copy the 16-character code.</li>
+                              <li>Create a new app password (name it "Cuneihire") and copy the 16-character code.</li>
                             </ol>
                             <p>Paste that 16-character code here (spaces don't matter).</p>
                           </>
-                        } 
+                        }
                       />
                     )}
                   </span>
@@ -292,7 +355,6 @@ export function SmtpConfigPanel({ config, onChange, onResetAll, onClose }: Props
                       id="tour-smtp-password"
                       type={showPassword ? "text" : "password"}
                       value={displayAppPassword}
-                      disabled={locked}
                       onChange={(e) => {
                         let val = e.target.value;
                         if (appPassword.startsWith("enc:")) {
@@ -307,54 +369,119 @@ export function SmtpConfigPanel({ config, onChange, onResetAll, onClose }: Props
                       type="button"
                       className="btn ghost password-toggle"
                       onClick={() => setShowPassword((v) => !v)}
-                      aria-label={
-                        showPassword ? "Hide password" : "Show password"
-                      }
+                      aria-label={showPassword ? "Hide password" : "Show password"}
                     >
                       {showPassword ? "Hide" : "Show"}
                     </button>
                   </div>
                 </label>
+
+                <label className="field">
+                  <span>
+                    Daily limit
+                    <HelpTooltip
+                      title="Daily limit"
+                      content={<p>The maximum number of emails this account will send per day. Keep it around 50 to avoid the provider flagging it as spam.</p>}
+                    />
+                  </span>
+                  <input
+                    type="number"
+                    min={1}
+                    max={500}
+                    value={dailyLimit}
+                    onChange={(e) => setDailyLimit(Number(e.target.value) || 50)}
+                  />
+                </label>
+
+                {canMonitorReplies ? (
+                  <label className="field" style={{ gridColumn: "1 / -1" }}>
+                    <span>
+                      Enable reply monitoring
+                      <HelpTooltip
+                        title="Reply monitoring"
+                        content={
+                          <p>
+                            Uses this account&apos;s same password to check for replies via IMAP, and
+                            surfaces them on the matching contact in JAMS. Only works for a real mailbox
+                            like Gmail or another IMAP-capable inbox — not relay services like SendGrid
+                            or Resend, which have no inbox to check.
+                          </p>
+                        }
+                      />
+                    </span>
+                    <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginTop: "0.25rem" }}>
+                      <input
+                        type="checkbox"
+                        checked={imapEnabled}
+                        onChange={(e) => setImapEnabled(e.target.checked)}
+                        style={{ width: "1.2rem", height: "1.2rem" }}
+                      />
+                      <span style={{ fontSize: "0.85rem", color: imapEnabled ? "var(--ok)" : "var(--muted)" }}>
+                        {imapEnabled ? "Active" : "Inactive"}
+                      </span>
+                    </div>
+                  </label>
+                ) : (
+                  <p className="hint compact" style={{ gridColumn: "1 / -1" }}>
+                    Reply monitoring isn&apos;t available for {currentProvider.name} — it&apos;s a relay
+                    service with no inbox to check.
+                  </p>
+                )}
+
+                {canMonitorReplies && imapEnabled && provider === "custom" && (
+                  <>
+                    <label className="field">
+                      <span>IMAP Host</span>
+                      <input
+                        type="text"
+                        value={imapHost}
+                        onChange={(e) => setImapHost(e.target.value)}
+                        placeholder="imap.example.com"
+                      />
+                    </label>
+                    <label className="field">
+                      <span>IMAP Port</span>
+                      <input
+                        type="number"
+                        value={imapPort}
+                        onChange={(e) => setImapPort(parseInt(e.target.value, 10) || 993)}
+                        placeholder="993"
+                      />
+                    </label>
+                  </>
+                )}
               </div>
 
               <div className="row">
-                {!locked && (
-                  <button
-                    type="button"
-                    className="btn primary"
-                    onClick={handleVerify}
-                    disabled={loading || !email || !appPassword || !host || !port}
-                  >
-                    {loading ? "�" : "Verify & Save"}
-                  </button>
-                )}
-                {locked && (
-                  <button
-                    type="button"
-                    className="btn"
-                    onClick={handleChangeSettings}
-                  >
-                    Edit
-                  </button>
-                )}
                 <button
                   type="button"
-                  className="btn ghost danger"
-                  onClick={handleReset}
+                  className="btn primary"
+                  onClick={handleVerifyAndSave}
+                  disabled={loading || !email || !appPassword || !host || !port}
                 >
-                  Reset all
+                  {loading ? "Verifying..." : "Verify & Save"}
+                </button>
+                <button
+                  type="button"
+                  className="btn ghost"
+                  onClick={() => {
+                    resetForm();
+                    setView("list");
+                  }}
+                >
+                  {accounts.length > 0 ? "Back to accounts" : "Cancel"}
                 </button>
                 {message && (
-                  <span
-                    className={message.type === "ok" ? "msg ok" : "msg err"}
-                  >
+                  <span className={message.type === "ok" ? "msg ok" : "msg err"}>
                     {message.text}
                   </span>
                 )}
               </div>
-            </div>
-          </div>
-        </div>,
+            </>
+          )}
+        </div>
+      </div>
+    </div>,
     document.body
   );
 }

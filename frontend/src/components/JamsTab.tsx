@@ -1,0 +1,739 @@
+"use client";
+
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import toast from "react-hot-toast";
+import { supabase } from "@/lib/supabase";
+import {
+  roleLabel,
+  type AiConfig,
+  type AutomailConfig,
+  type CandidateProfile,
+  type Recipient,
+  type ReplyRecord,
+  type Role,
+  type RoleDef,
+  type RoleTemplate,
+  type SentRecord,
+  type SmtpAccount,
+  type SmtpConfig,
+} from "@/lib/types";
+import { matchScoreTone } from "@/lib/jobPosts";
+import { StatusPill } from "./JobPostCard";
+import { ExecutionLogsPanel } from "./ExecutionLogsPanel";
+import { QuickSendModal } from "./QuickSendModal";
+
+type Props = {
+  userId: string | null;
+  recipients: Recipient[];
+  roleDefs: RoleDef[];
+  templates: Record<Role, RoleTemplate[]>;
+  config: SmtpConfig;
+  automail: AutomailConfig;
+  ai: AiConfig;
+  smtpAccounts: SmtpAccount[];
+  profile: CandidateProfile;
+  sentLog: SentRecord[];
+  onSentLogChange: (sentLog: SentRecord[]) => void;
+  replies: ReplyRecord[];
+  sentTodayCount: number;
+  sending: boolean;
+  onSendingChange: (sending: boolean) => void;
+  delaySec: number;
+  onDelayChange: (delaySec: number) => void;
+  onUpdateStatus?: (id: string, field: "status" | "phone_status", newStatus: string) => Promise<void>;
+};
+
+function sentKey(email: string, role: Role) {
+  return `${email.toLowerCase()}::${role}`;
+}
+
+function formatFriendlyError(errorMsg?: string) {
+  if (!errorMsg) return "Unknown error occurred.";
+  const msg = errorMsg.toLowerCase();
+  if (msg.includes("auth") || msg.includes("credentials") || msg.includes("password") || msg.includes("535")) {
+    return "Invalid email password or app password.";
+  }
+  if (msg.includes("network") || msg.includes("timeout") || msg.includes("econnrefused")) {
+    return "Could not connect to the email server. Please check your internet connection.";
+  }
+  if (msg.includes("rejected") || msg.includes("spam") || msg.includes("bounce")) {
+    return "The recipient's server rejected the email (possibly marked as spam or invalid address).";
+  }
+  if (msg.includes("limit") || msg.includes("quota")) {
+    return "You have reached your email provider's sending limit.";
+  }
+  return "Something went wrong while sending this email.";
+}
+
+const ACTIVITY_OPEN_KEY = "cuneihire_jams_activity_open";
+
+// The unified lifecycle hub — every contact found (scraped or manual), with matching context, sending
+// actions, and each contact's own send history all in one place. Absorbs what used to be four separate
+// tabs (Scraper & Contacts, Sending & Automail, Quick Send, Logs) — see docs/architecture.md. "Does this
+// job match what I'm looking for" is a *before-you-reach-out* question, so that discovery/scoring board
+// still lives on Jobs & Roles (JobsRolesTab.tsx); a contact sourced from a scraped post shows its match
+// score here only as read-only context.
+export function JamsTab({
+  userId,
+  recipients,
+  roleDefs,
+  templates,
+  config,
+  automail,
+  ai,
+  smtpAccounts,
+  profile,
+  sentLog,
+  onSentLogChange,
+  replies,
+  sentTodayCount,
+  sending,
+  onSendingChange,
+  delaySec,
+  onDelayChange,
+  onUpdateStatus,
+}: Props) {
+  const [filterStatus, setFilterStatus] = useState("all");
+  const [filterPhoneStatus, setFilterPhoneStatus] = useState("all");
+  const [filterSource, setFilterSource] = useState("all");
+  const [filterRole, setFilterRole] = useState("all");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [visibleCount, setVisibleCount] = useState(50);
+  const observerTarget = useRef<HTMLDivElement>(null);
+
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
+  const [expandedErrors, setExpandedErrors] = useState<Set<string>>(new Set());
+  const [previewEmail, setPreviewEmail] = useState<SentRecord | null>(null);
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  const [activityOpen, setActivityOpen] = useState(false);
+  useEffect(() => {
+    setActivityOpen(typeof window !== "undefined" && localStorage.getItem(ACTIVITY_OPEN_KEY) === "1");
+  }, []);
+  function toggleActivity() {
+    setActivityOpen((prev) => {
+      const next = !prev;
+      if (typeof window !== "undefined") localStorage.setItem(ACTIVITY_OPEN_KEY, next ? "1" : "0");
+      return next;
+    });
+  }
+
+  const [showQuickSend, setShowQuickSend] = useState(false);
+
+  // Sending (ported from the old SendPanel/QuickSendTab — same backend batch mechanism)
+  const [progress, setProgress] = useState({ current: 0, total: 0 });
+  const [status, setStatus] = useState("");
+  const abortRef = useRef(false);
+  const initialSentCount = useRef(0);
+  const expectedTotal = useRef(0);
+
+  // Rows currently queued on the backend batch worker — it polls every ~10s and then waits
+  // send_delay_sec (anti-ban jitter) before actually sending, so a row can sit looking identically
+  // "Pending" for tens of seconds with no visible sign anything is happening. This shows that it is.
+  const [queuedIds, setQueuedIds] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    if (queuedIds.size === 0) return;
+    setQueuedIds((prev) => {
+      let changed = false;
+      const next = new Set(prev);
+      for (const r of recipients) {
+        if (next.has(r.id) && (r.status || "pending") !== "pending") {
+          next.delete(r.id);
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [recipients]);
+
+  function markQueued(ids: string[]) {
+    setQueuedIds((prev) => {
+      const next = new Set(prev);
+      ids.forEach((id) => next.add(id));
+      return next;
+    });
+    // Safety net in case a status update is ever missed — nothing should look "queued" forever.
+    ids.forEach((id) => {
+      setTimeout(() => {
+        setQueuedIds((prev) => {
+          if (!prev.has(id)) return prev;
+          const next = new Set(prev);
+          next.delete(id);
+          return next;
+        });
+      }, 90000);
+    });
+  }
+
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      (entries) => { if (entries[0].isIntersecting) setVisibleCount((n) => n + 50); },
+      { threshold: 0.1, rootMargin: "200px" }
+    );
+    if (observerTarget.current) observer.observe(observerTarget.current);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    if (sending && expectedTotal.current > 0) {
+      const processed = Math.max(0, sentLog.length - initialSentCount.current);
+      setProgress({ current: processed, total: expectedTotal.current });
+      if (processed >= expectedTotal.current) {
+        onSendingChange(false);
+        setStatus("All emails processed.");
+        toast.success("Finished sending batch.");
+        expectedTotal.current = 0;
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sentLog.length, sending]);
+
+  const filtered = useMemo(() => {
+    return recipients.filter((r) => {
+      if (filterStatus !== "all" && (r.status || "pending") !== filterStatus) return false;
+      if (filterPhoneStatus !== "all" && (r.phone_status || "pending") !== filterPhoneStatus) return false;
+      if (filterSource !== "all" && (r.source || "auto_fetch") !== filterSource) return false;
+      if (filterRole !== "all" && r.role !== filterRole) return false;
+      if (searchQuery) {
+        const q = searchQuery.toLowerCase();
+        if (![r.email, r.phone, r.title].some((v) => (v || "").toLowerCase().includes(q))) return false;
+      }
+      return true;
+    });
+  }, [recipients, filterStatus, filterPhoneStatus, filterSource, filterRole, searchQuery]);
+
+  const visible = filtered.slice(0, visibleCount);
+
+  function historyFor(r: Recipient) {
+    const key = sentKey(r.email, r.role);
+    return sentLog.filter((s) => sentKey(s.email, s.role) === key);
+  }
+
+  function repliesFor(r: Recipient) {
+    return replies.filter((rep) => rep.recipientId === r.id);
+  }
+
+  function toggleExpand(id: string) {
+    setExpandedRows((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleError(key: string) {
+    setExpandedErrors((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
+
+  function toggleSelected(id: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleSelectAllVisible() {
+    setSelectedIds((prev) => (prev.size === visible.length ? new Set() : new Set(visible.map((r) => r.id))));
+  }
+
+  async function deleteSelected() {
+    if (selectedIds.size === 0) return;
+    if (!window.confirm(`Delete ${selectedIds.size} selected contact(s)?`)) return;
+    const ids = Array.from(selectedIds);
+    const { error } = await supabase.from("automailsend_recipients").delete().in("id", ids);
+    if (error) {
+      toast.error("Failed to delete selected contacts.");
+    } else {
+      toast.success(`Deleted ${ids.length} contact(s).`);
+      setSelectedIds(new Set());
+    }
+  }
+
+  async function sendList(list: Recipient[], options: { force: boolean }) {
+    if (!userId) return;
+    if (!smtpAccounts.some((a) => a.isVerified && a.isActive)) {
+      setStatus("Add and verify an SMTP account first.");
+      toast.error("Please add and verify at least one SMTP account first.");
+      return;
+    }
+    if (!list.length) {
+      setStatus(options.force ? "Nothing to resend." : "No pending contacts selected.");
+      toast.error(options.force ? "Nothing to resend." : "No pending contacts selected.");
+      return;
+    }
+    // 2026-08-20: how each recipient's email actually gets composed (manual template, "let AI choose"
+    // among your templates, or "let AI write it" from scratch) is decided once, per role, on the Email
+    // Templates tab's Configuration sub-tab — not re-chosen per bulk-send here. A manual/ai-select role
+    // just needs SOME templates to exist (the worker resolves which one per recipient); an ai-write role
+    // needs none at all — that's the whole point of the mode.
+    for (const role of new Set(list.map((r) => r.role))) {
+      const mode = roleDefs.find((d) => d.key === role)?.emailSendMode || "manual";
+      if (mode !== "ai-write" && !(templates[role]?.length)) {
+        setStatus(`No template set up for: ${roleLabel(roleDefs, role)}`);
+        toast.error(`No template set up for role: ${roleLabel(roleDefs, role)} — add one on the Email Templates tab.`);
+        return;
+      }
+    }
+
+    abortRef.current = false;
+    onSendingChange(true);
+    setProgress({ current: 0, total: list.length });
+    setStatus(`Preparing to send ${list.length} email(s)…`);
+
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) {
+      toast.error("You must be logged in to send emails.");
+      onSendingChange(false);
+      return;
+    }
+
+    try {
+      const toProcess = list.filter((r) => options.force || (r.status || "pending") !== "sent");
+      if (toProcess.length === 0) {
+        setStatus("Nothing new to send.");
+        toast.success("All selected contacts have already been sent.");
+        onSendingChange(false);
+        return;
+      }
+
+      initialSentCount.current = sentLog.length;
+      expectedTotal.current = toProcess.length;
+
+      const updatedConfig = {
+        ...config,
+        batchTargetIds: list.length === recipients.length ? null : list.map((r) => r.id),
+      };
+
+      const { error } = await supabase
+        .from("automailsend_app_state")
+        .update({ batch_send_pending: true, batch_send_processing: false, config: updatedConfig })
+        .eq("user_id", userId);
+
+      if (error) {
+        setStatus("Failed to start batch.");
+        toast.error(error.message || "Failed to update database.");
+        onSendingChange(false);
+      } else {
+        setStatus("Background send started! Tracking progress...");
+        toast.success("Background send started!");
+        setSelectedIds(new Set());
+        markQueued(toProcess.map((r) => r.id));
+      }
+    } catch {
+      setStatus("Network error queuing batch.");
+      toast.error("Network error queuing batch.");
+      onSendingChange(false);
+    }
+  }
+
+  async function stopSending() {
+    abortRef.current = true;
+    setStatus("Stopping soon...");
+    try {
+      if (!userId) return;
+      const { error } = await supabase
+        .from("automailsend_app_state")
+        .update({ batch_send_pending: false, batch_send_processing: false })
+        .eq("user_id", userId);
+      if (error) throw error;
+      toast.success("Stop command sent. Ending loop...");
+      onSendingChange(false);
+      expectedTotal.current = 0;
+    } catch {
+      toast.error("Failed to send stop command.");
+    }
+  }
+
+  const selectedRecipients = useMemo(
+    () => visible.filter((r) => selectedIds.has(r.id)),
+    [visible, selectedIds]
+  );
+
+  return (
+    <section className="panel">
+      <div className="panel-head">
+        <div>
+          <h2>JAMS</h2>
+          <span className="hint compact">Every contact you&apos;ve found, scraped or manual — matched, contacted, and tracked in one place</span>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", fontSize: "0.8rem" }}>
+          <span style={{ color: "var(--muted)" }}>Daily mail limit:</span>
+          <span style={{
+            background: "var(--bg)",
+            padding: "3px 10px",
+            borderRadius: "999px",
+            border: "1px solid var(--line)",
+            fontWeight: 600,
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "6px",
+          }}>
+            <span style={{
+              width: "8px",
+              height: "8px",
+              borderRadius: "50%",
+              background: sentTodayCount >= automail.dailyLimit ? "var(--danger)" : "var(--ok)",
+              display: "inline-block",
+            }} />
+            {sentTodayCount} / {automail.dailyLimit}
+          </span>
+        </div>
+      </div>
+      <div className="panel-body">
+        {sentTodayCount >= automail.dailyLimit && (
+          <div style={{ padding: "0.75rem", background: "var(--danger-light)", color: "var(--danger)", borderRadius: "6px", marginBottom: "1rem", fontSize: "0.9rem", textAlign: "center" }}>
+            You have reached your daily limit of <strong>{automail.dailyLimit}</strong> emails. Sending is paused until tomorrow.
+          </div>
+        )}
+
+        <div style={{ display: "flex", gap: "0.5rem", marginBottom: "1rem", flexWrap: "wrap", alignItems: "flex-start" }}>
+          <button type="button" className="btn primary" onClick={() => setShowQuickSend(true)}>
+            + Quick Send
+          </button>
+          <button type="button" className="btn ghost" onClick={toggleActivity} style={{ fontSize: "0.8rem" }}>
+            {activityOpen ? "▾" : "▸"} Automation Activity
+          </button>
+        </div>
+        {activityOpen && userId && (
+          <div style={{ marginBottom: "1rem" }}>
+            <ExecutionLogsPanel userId={userId} />
+          </div>
+        )}
+
+        <div className="row" style={{ alignItems: "flex-end" }}>
+          <label className="field" style={{ flex: 1, minWidth: "220px" }}>
+            <span>Search</span>
+            <input
+              type="text"
+              placeholder="Search email, phone, title..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+            />
+          </label>
+          <label className="field">
+            <span>Email status</span>
+            <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}>
+              <option value="all">All</option>
+              <option value="pending">Pending</option>
+              <option value="sent">Sent</option>
+              <option value="failed">Failed</option>
+            </select>
+          </label>
+          <label className="field">
+            <span>Phone status</span>
+            <select value={filterPhoneStatus} onChange={(e) => setFilterPhoneStatus(e.target.value)}>
+              <option value="all">All</option>
+              <option value="pending">Pending</option>
+              <option value="sent">Msg sent</option>
+              <option value="wrong_number">Wrong number</option>
+            </select>
+          </label>
+          <label className="field">
+            <span>Source</span>
+            <select value={filterSource} onChange={(e) => setFilterSource(e.target.value)}>
+              <option value="all">All</option>
+              <option value="auto_fetch">Auto-fetch</option>
+              <option value="manual">Manual</option>
+            </select>
+          </label>
+          <label className="field">
+            <span>Role</span>
+            <select value={filterRole} onChange={(e) => setFilterRole(e.target.value)}>
+              <option value="all">All roles</option>
+              {roleDefs.map((d) => <option key={d.key} value={d.key}>{d.label}</option>)}
+            </select>
+          </label>
+          <label className="field">
+            <span>Delay (sec)</span>
+            <input
+              type="number"
+              min={0}
+              step={1}
+              value={delaySec}
+              onChange={(e) => onDelayChange(Number(e.target.value) || 0)}
+              disabled={sending}
+              style={{ width: "80px" }}
+            />
+          </label>
+        </div>
+
+        {selectedIds.size > 0 && (
+          <div className="card-header actions-bar" style={{ marginTop: "1rem" }}>
+            <span className="chip">{selectedIds.size} selected</span>
+            <div style={{ display: "flex", gap: "0.5rem" }}>
+              <button type="button" className="btn" onClick={() => sendList(selectedRecipients, { force: false })} disabled={sending}>
+                Send Selected
+              </button>
+              <button type="button" className="btn ghost danger" onClick={deleteSelected} disabled={sending}>
+                Delete Selected
+              </button>
+              <button type="button" className="btn ghost" onClick={() => setSelectedIds(new Set())}>
+                Clear selection
+              </button>
+            </div>
+          </div>
+        )}
+
+        {status && <p className="status-line">{status}</p>}
+        {sending && progress.total > 0 && (
+          <div className="progress" style={{ marginBottom: "0.5rem" }}>
+            <div className="progress-bar" style={{ width: `${(progress.current / progress.total) * 100}%` }} />
+          </div>
+        )}
+        {sending && (
+          <button type="button" className="btn ghost danger" style={{ marginBottom: "1rem", border: "1px solid var(--danger)", background: "var(--bg-elevated)" }} onClick={stopSending}>
+            Stop Sending
+          </button>
+        )}
+
+        {visible.length === 0 ? (
+          <p className="hint" style={{ margin: 0 }}>No contacts found matching your filters.</p>
+        ) : (
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.8rem" }}>
+            <thead>
+              <tr>
+                <th style={{ padding: "0.5rem 0.4rem" }}>
+                  <input type="checkbox" checked={visible.length > 0 && selectedIds.size === visible.length} onChange={toggleSelectAllVisible} />
+                </th>
+                <th style={{ textAlign: "left", padding: "0.5rem 0.6rem", color: "var(--muted)", fontWeight: 600 }}>Contact</th>
+                <th style={{ textAlign: "left", padding: "0.5rem 0.6rem", color: "var(--muted)", fontWeight: 600 }}>Role &amp; title</th>
+                <th style={{ textAlign: "left", padding: "0.5rem 0.6rem", color: "var(--muted)", fontWeight: 600 }}>Match</th>
+                <th style={{ textAlign: "left", padding: "0.5rem 0.6rem", color: "var(--muted)", fontWeight: 600 }}>Email</th>
+                <th style={{ textAlign: "left", padding: "0.5rem 0.6rem", color: "var(--muted)", fontWeight: 600 }}>Phone</th>
+                <th style={{ textAlign: "left", padding: "0.5rem 0.6rem", color: "var(--muted)", fontWeight: 600 }}>Source</th>
+                <th style={{ textAlign: "left", padding: "0.5rem 0.6rem", color: "var(--muted)", fontWeight: 600 }}>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {visible.map((r) => {
+                const tone = r.job_post_id ? matchScoreTone(r.match_score) : null;
+                const history = historyFor(r);
+                const contactReplies = repliesFor(r);
+                const isExpanded = expandedRows.has(r.id);
+                const emailStatus = r.status || "pending";
+                return (
+                  <Fragment key={r.id}>
+                    <tr style={{ borderTop: "1px solid var(--line)" }}>
+                      <td style={{ padding: "0.5rem 0.4rem" }}>
+                        <input type="checkbox" checked={selectedIds.has(r.id)} onChange={() => toggleSelected(r.id)} />
+                      </td>
+                      <td style={{ padding: "0.5rem 0.6rem" }}>
+                        <div>{r.email || <span className="hint">No email</span>}</div>
+                        {r.phone && <div className="hint" style={{ margin: 0 }}>{r.phone}</div>}
+                      </td>
+                      <td style={{ padding: "0.5rem 0.6rem" }}>
+                        <span className="chip">{roleLabel(roleDefs, r.role)}</span>
+                        {r.title && <div className="hint" style={{ margin: "0.25rem 0 0" }}>{r.title}</div>}
+                      </td>
+                      <td style={{ padding: "0.5rem 0.6rem" }}>
+                        {tone ? (
+                          <span style={{ color: tone.color, fontWeight: 700, fontSize: "0.75rem" }}>{tone.label}</span>
+                        ) : (
+                          <span className="hint">—</span>
+                        )}
+                        {r.source_url && (
+                          <div>
+                            <a href={r.source_url} target="_blank" rel="noopener noreferrer" className="msg" style={{ color: "var(--accent)" }}>
+                              View post ↗
+                            </a>
+                          </div>
+                        )}
+                      </td>
+                      <td style={{ padding: "0.5rem 0.6rem" }}>
+                        <StatusPill status={r.status} />
+                        {r.hasReplied && (
+                          <span className="badge ok" style={{ marginLeft: "0.4rem", fontSize: "0.65rem" }} title="Replied to this outreach">
+                            ↩ Replied{(r.replyCount || 0) > 1 ? ` (${r.replyCount})` : ""}
+                          </span>
+                        )}
+                      </td>
+                      <td style={{ padding: "0.5rem 0.6rem" }}>
+                        {r.phone ? (
+                          <select
+                            value={r.phone_status || "pending"}
+                            onChange={(e) => onUpdateStatus?.(r.id, "phone_status", e.target.value)}
+                            style={{ fontSize: "0.72rem", padding: "0.15rem 0.3rem" }}
+                          >
+                            <option value="pending">Pending</option>
+                            <option value="sent">Msg sent</option>
+                            <option value="wrong_number">Wrong number</option>
+                          </select>
+                        ) : (
+                          <span className="hint">—</span>
+                        )}
+                      </td>
+                      <td style={{ padding: "0.5rem 0.6rem" }}>
+                        <span className="hint" style={{ margin: 0 }}>{r.source === "manual" ? "Manual" : "Auto-fetch"}</span>
+                      </td>
+                      <td style={{ padding: "0.5rem 0.6rem" }}>
+                        <div style={{ display: "flex", gap: "0.3rem", flexWrap: "wrap", alignItems: "center" }}>
+                          {queuedIds.has(r.id) ? (
+                            <span className="hint compact" style={{ display: "inline-flex", alignItems: "center", gap: "0.3rem", color: "var(--accent)" }}>
+                              <span className="spinner-dot" style={{ width: "6px", height: "6px", borderRadius: "50%", background: "var(--accent)", display: "inline-block" }} />
+                              Queued — sending soon…
+                            </span>
+                          ) : emailStatus !== "sent" ? (
+                            <button type="button" className="btn ghost" style={{ fontSize: "0.7rem", padding: "0.15rem 0.4rem" }} disabled={sending} onClick={() => sendList([r], { force: false })}>
+                              Send
+                            </button>
+                          ) : (
+                            <button type="button" className="btn ghost" style={{ fontSize: "0.7rem", padding: "0.15rem 0.4rem" }} disabled={sending} onClick={() => sendList([r], { force: true })}>
+                              Resend
+                            </button>
+                          )}
+                          {(history.length > 0 || contactReplies.length > 0) && (
+                            <button type="button" className="btn ghost" style={{ fontSize: "0.7rem", padding: "0.15rem 0.4rem" }} onClick={() => toggleExpand(r.id)}>
+                              {isExpanded
+                                ? "Hide history ▾"
+                                : `History (${history.length}${contactReplies.length > 0 ? ` · ${contactReplies.length} reply` : ""}) ▸`}
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                    {isExpanded && (
+                      <tr style={{ background: "var(--bg-elevated)" }}>
+                        <td></td>
+                        <td colSpan={7} style={{ padding: "0.5rem 0.6rem 0.75rem" }}>
+                          <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem" }}>
+                            {history.map((s, idx) => {
+                              const itemKey = `${r.id}-${s.sentAt}-${idx}`;
+                              const isErrExpanded = expandedErrors.has(itemKey);
+                              return (
+                                <div key={itemKey} style={{ fontSize: "0.75rem", border: "1px solid var(--line)", borderRadius: "6px", padding: "0.4rem 0.6rem" }}>
+                                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "0.5rem" }}>
+                                    <span>
+                                      <span className={`badge ${s.status === "failed" ? "danger" : "ok"}`} style={{ marginRight: "0.5rem" }}>{s.status}</span>
+                                      {new Date(s.sentAt).toLocaleString()}
+                                    </span>
+                                    <span style={{ display: "flex", gap: "0.4rem" }}>
+                                      {(s.subject || s.body) && (
+                                        <button type="button" className="btn ghost" style={{ fontSize: "0.7rem", padding: "0.1rem 0.4rem" }} onClick={() => setPreviewEmail(s)}>
+                                          Preview
+                                        </button>
+                                      )}
+                                      {s.status === "failed" && (
+                                        <button type="button" className="btn ghost" style={{ fontSize: "0.7rem", padding: "0.1rem 0.4rem" }} onClick={() => toggleError(itemKey)}>
+                                          {isErrExpanded ? "Hide reason" : "Why?"}
+                                        </button>
+                                      )}
+                                    </span>
+                                  </div>
+                                  {(s.templateLabel || s.resumeLabel) && (
+                                    <div style={{ marginTop: "0.3rem", fontSize: "0.68rem", color: "var(--muted)" }}>
+                                      {s.templateLabel && <>Template: <strong>{s.templateLabel}</strong></>}
+                                      {s.templateLabel && s.resumeLabel && "  ·  "}
+                                      {s.resumeLabel && <>Resume: <strong>{s.resumeLabel}</strong></>}
+                                    </div>
+                                  )}
+                                  {s.status === "failed" && isErrExpanded && (
+                                    <div style={{ marginTop: "0.35rem", color: "var(--danger)" }}>
+                                      {formatFriendlyError(s.error)}
+                                      {s.error && <div style={{ fontSize: "0.65rem", opacity: 0.7, marginTop: "0.2rem", wordBreak: "break-all" }}>Technical info: {s.error}</div>}
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
+                            {contactReplies.length > 0 && (
+                              <>
+                                <div style={{ fontSize: "0.7rem", color: "var(--muted)", fontWeight: 600, marginTop: history.length > 0 ? "0.3rem" : 0 }}>
+                                  Replies
+                                </div>
+                                {contactReplies.map((rep) => (
+                                  <div key={rep.id} style={{ fontSize: "0.75rem", border: "1px solid var(--accent)", borderRadius: "6px", padding: "0.4rem 0.6rem" }}>
+                                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "0.5rem" }}>
+                                      <span>↩ {rep.fromEmail}</span>
+                                      {rep.receivedAt && <span className="hint compact">{new Date(rep.receivedAt).toLocaleString()}</span>}
+                                    </div>
+                                    {rep.subject && <div style={{ marginTop: "0.2rem", fontWeight: 500 }}>{rep.subject}</div>}
+                                    {rep.bodySnippet && (
+                                      <div style={{ marginTop: "0.2rem", color: "var(--muted)", whiteSpace: "pre-wrap" }}>
+                                        {rep.bodySnippet.length > 240 ? `${rep.bodySnippet.slice(0, 240)}…` : rep.bodySnippet}
+                                      </div>
+                                    )}
+                                  </div>
+                                ))}
+                              </>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+        <div ref={observerTarget} style={{ height: "1px" }} />
+        <p className="hint" style={{ margin: 0 }}>Showing {visible.length} of {filtered.length} ({recipients.length} total)</p>
+      </div>
+
+      {previewEmail && mounted && createPortal(
+        <div className="modal-backdrop" role="presentation" onClick={() => setPreviewEmail(null)} style={{ zIndex: 99999 }}>
+          <div
+            className="modal-card"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="email-preview-modal-title"
+            style={{ width: "min(600px, 100%)" }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="modal-head">
+              <h2 id="email-preview-modal-title">Sent Email Preview</h2>
+              <button type="button" className="btn ghost" onClick={() => setPreviewEmail(null)}>Close</button>
+            </div>
+            <div className="modal-body" style={{ maxHeight: "60vh", overflowY: "auto" }}>
+              <div>
+                <strong style={{ color: "var(--muted)" }}>To:</strong> {previewEmail.email}
+              </div>
+              {(previewEmail.templateLabel || previewEmail.resumeLabel) && (
+                <div style={{ fontSize: "0.78rem", color: "var(--muted)" }}>
+                  {previewEmail.templateLabel && <>Template: <strong>{previewEmail.templateLabel}</strong></>}
+                  {previewEmail.templateLabel && previewEmail.resumeLabel && "  ·  "}
+                  {previewEmail.resumeLabel && <>Resume: <strong>{previewEmail.resumeLabel}</strong></>}
+                </div>
+              )}
+              <div style={{ paddingBottom: "0.75rem", borderBottom: "1px solid var(--line)" }}>
+                <strong style={{ color: "var(--muted)" }}>Subject:</strong> {previewEmail.subject || "(No Subject)"}
+              </div>
+              <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.5, color: "var(--fg)" }}>
+                {previewEmail.body || "(No Body)"}
+              </div>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {showQuickSend && userId && (
+        <QuickSendModal
+          userId={userId}
+          roleDefs={roleDefs}
+          templates={templates}
+          automail={automail}
+          ai={ai}
+          smtpAccounts={smtpAccounts}
+          profile={profile}
+          sentTodayCount={sentTodayCount}
+          onClose={() => setShowQuickSend(false)}
+        />
+      )}
+    </section>
+  );
+}

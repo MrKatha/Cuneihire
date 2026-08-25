@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { DM_Sans, Fraunces } from "next/font/google";
+import { DM_Sans, Fraunces, Geist_Mono } from "next/font/google";
 import "./globals.css";
 
 const sans = DM_Sans({
@@ -12,10 +12,15 @@ const display = Fraunces({
   subsets: ["latin"],
 });
 
+const mono = Geist_Mono({
+  variable: "--font-mono",
+  subsets: ["latin"],
+});
+
 export const metadata: Metadata = {
-  title: "Viddr",
-  description: "Viddr - Email Automation SaaS",
-  keywords: ["email", "automation", "saas", "viddr", "bulk email"],
+  title: "Cuneihire",
+  description: "Cuneihire — AI-automated job applications, by Cuneihive",
+  keywords: ["job applications", "automation", "ai", "cuneihire", "cuneihive"],
 };
 
 import { Toaster } from "react-hot-toast";
@@ -26,28 +31,21 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className={`${sans.variable} ${display.variable}`}>
+    <html lang="en" className={`${sans.variable} ${display.variable} ${mono.variable}`}>
       <body className="antialiased flex flex-col min-h-screen">
         <main className="flex-grow flex flex-col">
           {children}
         </main>
-        
-        <footer className="w-full py-8 mt-auto" style={{ borderTop: '1px solid rgba(0,0,0,0.1)', backgroundColor: 'transparent' }}>
-          <div className="container mx-auto px-4 flex flex-col md:flex-row justify-between items-center gap-4 text-sm text-gray-500">
+
+        <footer className="w-full py-8 mt-auto" style={{ borderTop: '1px solid var(--line)', backgroundColor: 'transparent' }}>
+          <div className="container mx-auto px-4 flex flex-col md:flex-row justify-between items-center gap-4 text-sm" style={{ color: 'var(--muted)' }}>
             <div>
-              &copy; 2026 Viddr by <a href="https://ismailabbasi.qzz.io/" target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:underline">Ismail Abbasi</a>
-            </div>
-            <div className="flex flex-wrap gap-4">
-              <a href="https://linkedin.com/in/ismailabbasi" target="_blank" rel="noopener noreferrer" className="hover:text-gray-900 transition-colors">LinkedIn</a>
-              <a href="https://github.com/ismailofficialGithub" target="_blank" rel="noopener noreferrer" className="hover:text-gray-900 transition-colors">GitHub</a>
-              <a href="https://noctisai.ismailabbasi.qzz.io" target="_blank" rel="noopener noreferrer" className="hover:text-gray-900 transition-colors">NoctisAI</a>
-              <a href="https://call.ismailabbasi.qzz.io" target="_blank" rel="noopener noreferrer" className="hover:text-gray-900 transition-colors">Call</a>
-              <a href="https://viddr.ismailabbasi.qzz.io" target="_blank" rel="noopener noreferrer" className="hover:text-gray-900 transition-colors">Viddr Web</a>
+              &copy; 2026 Cuneihire — built by <a href="https://cuneihive.com" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--accent)' }} className="hover:underline">Cuneihive</a>
             </div>
           </div>
           <div className="container mx-auto px-4 mt-4 text-center">
-            <p className="text-[10px] text-gray-400 opacity-60 max-w-3xl mx-auto">
-              Disclaimer & Privacy: This tool is provided "as is" without warranties of any kind. Any use of this platform for automated messaging or email sending is strictly at your own risk. The developer assumes no liability for account bans, data loss, or misuse of this software.
+            <p className="text-[10px] opacity-60 max-w-3xl mx-auto" style={{ color: 'var(--muted)' }}>
+              Disclaimer & Privacy: This tool is provided "as is" without warranties of any kind. Any use of this platform for automated messaging or email sending is strictly at your own risk. Cuneihire assumes no liability for account bans, data loss, or misuse of this software.
             </p>
           </div>
         </footer>

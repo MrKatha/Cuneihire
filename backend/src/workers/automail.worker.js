@@ -3,16 +3,13 @@ const nodemailer = require("nodemailer");
 const axios = require("axios");
 const { decryptPassword } = require("../lib/crypto");
 const { ExecutionLogger } = require("../lib/logger");
-const { generateAiPersonalizedEmail } = require("../services/ai.service");
+const { chooseTemplateForJob, generateAiPersonalizedEmail, applyPlaceholders, hasUnresolvedPlaceholders } = require("../services/ai.service");
+const { loadAccountPool, buildTransporter } = require("../lib/smtpPool");
+const { resolveRoleAttachments, describeFiles } = require("../lib/emailResolve");
+const { spendAiCredit } = require("../lib/aiCredits");
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function applyPlaceholders(text, recipient) {
-  return text
-    .replaceAll("{{title}}", recipient.title || "")
-    .replaceAll("{{email}}", recipient.email);
 }
 
 function getStartOfDayUTC() {
@@ -30,52 +27,62 @@ async function runAutomailJobs(supabase) {
       .eq("automail_enabled", true);
 
     if (usersErr) throw usersErr;
-    
+
     console.log(pc.dim(`  -> Result: Found ${users ? users.length : 0} users with automail enabled.`));
     if (!users || users.length === 0) return;
 
     for (const user of users) {
       const userId = user.user_id;
-      const email = user.smtp_email;
-      const appPassword = user.smtp_password;
-      const limit = parseInt(user.daily_mail_limit, 10) || 50;
       const defaultInterval = process.env.AUTOMAIL_WORKER_INTERVAL_SEC ? parseInt(process.env.AUTOMAIL_WORKER_INTERVAL_SEC, 10) : 3;
       const delaySec = user.send_delay_sec || defaultInterval;
-      
-      const aiProvider = user.ai_provider || "none";
-      const aiApiKey = user.ai_api_key;
-      const aiPrompt = user.ai_prompt || "You are an expert recruiter. Analyze the POST TEXT. If it's completely irrelevant or doesn't look like a job/hiring post, return {\"skip\": true, \"reason\": \"Irrelevant post\"}. Otherwise, adapt the BASE TEMPLATE to perfectly match the role/requirements described in the POST TEXT. CRITICAL: DO NOT use placeholders like [Name], [Company], etc. If you don't know a piece of information, either infer it from the context or rephrase to omit it. Always sign off with a proper name if available in the template, never use placeholders or generic company names for the sender signature. Output ONLY valid JSON with 'subject' and 'body' keys (or 'skip' and 'reason').";
+
+      // Platform-managed AI (2026-08-18) — no more per-user provider/key, just an enable toggle + a
+      // credit balance spent via spendAiCredit() after each successful Gemini call. See aiCredits.js.
+      const aiEnabled = !!user.ai_personalization_enabled;
+      const aiTemperature = typeof user.ai_temperature === "number" ? user.ai_temperature : 0.4;
+      // AI tab (2026-08-18) — a recipient whose scored job post falls below this is skipped entirely by
+      // this fully-automated loop (never applied to JAMS's manual/bulk sends in batchSend.worker.js). 0
+      // means off. Posts with no score yet (match_score null) are never gated — unknown isn't a fail.
+      const matchStrictness = user.ai_match_strictness || 0;
+      let strictnessSkippedLogged = false;
+      // Structured, user-controlled contact info backing the {{candidate_*}} template variables (see
+      // ai.service.js's applyPlaceholders/buildUserMessage). Moved off app_state to its own table
+      // (2026-08-19, frontend's automailsend_candidate_profiles — the permanent knowledge base a role's
+      // resume module selection now draws from) — app_state's old candidate_* columns are stale/unused
+      // as of that change, so this must read the new table, not user.candidate_*.
+      // 2026-08-19: also select global_files — the candidate's whole files pool (repurposed column, see
+      // storage.ts's mapCandidateProfileRow) — resolveRoleAttachments() below reads it directly off this
+      // raw row (snake_case), same as the role_defs rows. 2026-08-20: also global_resume_id — the
+      // candidate-level default resume a role falls back to unless it has its own resume_id override.
+      const { data: candidateProfileRow } = await supabase
+        .from("automailsend_candidate_profiles")
+        .select("name, email, phone, portfolio_url, resume_url, global_files, global_resume_id")
+        .eq("user_id", userId)
+        .maybeSingle();
+      const profile = {
+        name: candidateProfileRow?.name || "",
+        email: candidateProfileRow?.email || "",
+        phone: candidateProfileRow?.phone || "",
+        portfolioUrl: candidateProfileRow?.portfolio_url || "",
+        resumeUrl: candidateProfileRow?.resume_url || "",
+      };
 
       if (user.is_blocked) {
         console.log(pc.red(`[Automail] User ${userId} is blocked by admin. Skipping.`));
         continue;
       }
 
-      if (!email || !appPassword) {
-        console.log(pc.yellow(`[Automail] User ${userId.substring(0, 8)} enabled automail but missing SMTP creds. Skipping.`));
+      // 2. Load this user's SMTP account pool (active + verified), each with its own remaining
+      // daily quota already computed against today's sent_log.
+      const pool = await loadAccountPool(supabase, userId, getStartOfDayUTC());
+      if (pool.length === 0) {
+        console.log(pc.yellow(`[Automail] User ${userId.substring(0, 8)} enabled automail but has no verified, active SMTP accounts. Skipping.`));
         continue;
       }
 
-      // Delay logger creation until we are sure there is work to do
-
-
-      // 2. Determine how many emails they can send today
-      const { count: sentToday, error: countErr } = await supabase
-        .from("automailsend_sent_log")
-        .select("*", { count: "exact", head: true })
-        .eq("user_id", userId)
-        .eq("status", "sent")
-        .gte("sent_at", getStartOfDayUTC());
-
-      if (countErr) {
-        console.error(pc.red(`Error fetching sent count for user ${userId}: ${countErr.message}`));
-        continue;
-      }
-
-      const remainingQuota = limit - (sentToday || 0);
-      
-      if (remainingQuota <= 0) {
-        // Silently skip to prevent log flooding every 3 seconds
+      const totalRemaining = pool.reduce((sum, a) => sum + Math.max(0, a.remaining), 0);
+      if (totalRemaining <= 0) {
+        // Silently skip to prevent log flooding every few seconds
         continue;
       }
 
@@ -85,13 +92,13 @@ async function runAutomailJobs(supabase) {
         .select("*")
         .eq("user_id", userId)
         .eq("status", "pending")
-        .limit(remainingQuota * 3); // fetch extra to account for duplicates
+        .limit(totalRemaining * 3); // fetch extra to account for duplicates
 
       if (pendingErr) {
         console.error(pc.red(`Error fetching pending recipients for user ${userId}: ${pendingErr.message}`));
         continue;
       }
-      
+
       const uniquePendingMap = new Map();
       for (const r of (rawPending || [])) {
         if (!r.email) {
@@ -103,7 +110,7 @@ async function runAutomailJobs(supabase) {
           uniquePendingMap.set(key, r);
         }
       }
-      const pending = Array.from(uniquePendingMap.values()).slice(0, remainingQuota);
+      const pending = Array.from(uniquePendingMap.values()).slice(0, totalRemaining);
 
       if (!pending || pending.length === 0) {
         // Silently skip if no emails to send
@@ -113,11 +120,12 @@ async function runAutomailJobs(supabase) {
       // We have work to do, initialize the logger
       const logger = new ExecutionLogger(userId, "automail");
       await logger.start(`Starting Automail batch process...`);
-      await logger.append("INFO", `Checking Quota - Limit: ${limit}, Sent Today: ${sentToday || 0}, Remaining: ${remainingQuota}`);
+      await logger.append("INFO", `SMTP pool: ${pool.length} account(s), ${totalRemaining} remaining today. Pending: ${pending.length}`);
 
-      await logger.append("INFO", `Quota: ${remainingQuota}, Pending: ${pending.length}`);
-
-      // 4. Fetch user templates
+      // 4. Fetch user templates + role defs. 2026-08-19: randomization removed — each role now has an
+      // explicit email_send_mode (manual/ai-select/ai-write) + selected_template_id, resolved per
+      // recipient below. Attachments are resolved per ROLE too — one resume (own resume_id override, or
+      // the candidate's global_resume_id) — see resolveRoleAttachments() in lib/emailResolve.js.
       const { data: templates, error: tempErr } = await supabase
         .from("automailsend_templates")
         .select("*")
@@ -128,48 +136,140 @@ async function runAutomailJobs(supabase) {
         continue;
       }
 
+      const { data: roleDefs } = await supabase
+        .from("automailsend_role_defs")
+        .select("key, email_send_mode, selected_template_id, resume_id")
+        .eq("user_id", userId);
+
       const templatesByRole = {};
-      templates.forEach(t => { templatesByRole[t.role] = t; });
+      templates.forEach(t => { (templatesByRole[t.role] = templatesByRole[t.role] || []).push(t); });
 
-      // 5. Setup Nodemailer
-      const config = user.config || {};
-      let host = config.host || 'smtp.gmail.com';
-      let port = config.port || 465;
-      let secure = port === 465;
-      if (email.includes('@outlook.com') || email.includes('@hotmail.com')) {
-        host = 'smtp-mail.outlook.com';
-        port = 587;
-        secure = false;
-      }
-  
-      let passwordToUse = appPassword;
-      if (passwordToUse.startsWith("enc:")) {
-        try {
-          passwordToUse = decryptPassword(passwordToUse);
-        } catch (err) {
-          await logger.finish("error", `Failed to decrypt SMTP password.`);
-          continue;
-        }
-      }
-      passwordToUse = passwordToUse.replace(/\s+/g, "");
+      const roleDefByKey = {};
+      (roleDefs || []).forEach(r => { roleDefByKey[r.key] = r; });
 
-      const transporter = nodemailer.createTransport({
-        host,
-        port,
-        secure,
-        auth: {
-          user: email,
-          pass: passwordToUse,
-        },
-      });
-
-      // 6. Send loop
+      // 5. Send loop — pick the account with the most remaining quota for each recipient, building
+      // (and caching) one transporter per account actually used.
+      const transporters = new Map();
       let sentCount = 0;
       for (const recipient of pending) {
-        const template = templatesByRole[recipient.role];
-        if (!template || !template.subject || !template.content) {
-          await logger.append("WARN", `Missing template for role ${recipient.role}. Skipping recipient ${recipient.email}.`);
+        // AI tab match strictness (2026-08-18) — skip entirely, before any template/AI/send work, when
+        // this recipient's scored job post falls below the threshold. Unscored posts (match_score null)
+        // are never gated — see the field's comment in types.ts for why "unknown" isn't treated as a fail.
+        if (matchStrictness > 0 && recipient.match_score != null && recipient.match_score < matchStrictness) {
+          await supabase.from("automailsend_recipients").update({ status: "failed" }).eq("id", recipient.id);
+          await supabase.from("automailsend_sent_log").insert({
+            user_id: userId,
+            email: recipient.email || recipient.phone || "Unknown",
+            role: recipient.role,
+            title: recipient.title,
+            status: "skipped",
+            error_message: `Below your match strictness threshold (scored ${recipient.match_score}, need ${matchStrictness}+).`,
+          });
+          if (!strictnessSkippedLogged) {
+            await logger.append("INFO", `Skipping recipient(s) below your match strictness threshold (${matchStrictness}) for the rest of this run.`);
+            strictnessSkippedLogged = true;
+          }
           continue;
+        }
+
+        const account = pool
+          .filter(a => a.remaining > 0)
+          .sort((a, b) => b.remaining - a.remaining)[0];
+
+        if (!account) {
+          await logger.append("WARN", `All SMTP accounts have reached their daily limit. Stopping early.`);
+          break;
+        }
+
+        // 2026-08-20: role-mode-aware resolution replaces pickFromPool()'s randomization — three send
+        // modes (manual / ai-select / ai-write — "let AI write the whole email" was tried, dropped, then
+        // brought back per operator ask; see docs/architecture.md's "Email Templates redesign" section
+        // and its follow-ups).
+        const roleTemplates = templatesByRole[recipient.role] || [];
+        const roleDef = roleDefByKey[recipient.role];
+        const sendMode = roleDef?.email_send_mode || "manual";
+
+        let template = null;
+        if (sendMode === "manual") {
+          template = roleTemplates.find((t) => t.id === roleDef?.selected_template_id) || null;
+          if (!template) {
+            await logger.append("WARN", `Role "${recipient.role}" is set to manual but has no template selected. Skipping recipient ${recipient.email}.`);
+            continue;
+          }
+        } else if (sendMode === "ai-select") {
+          if (roleTemplates.length === 0) {
+            await logger.append("WARN", `Role "${recipient.role}" is set to "Let AI choose" but has no templates yet. Skipping recipient ${recipient.email}.`);
+            continue;
+          }
+          if (aiEnabled && user.ai_credits > 0) {
+            try {
+              template = await chooseTemplateForJob(roleTemplates, recipient.role, recipient.context_text, aiTemperature);
+              if (template) {
+                const spent = await spendAiCredit(supabase, userId);
+                user.ai_credits = spent ? user.ai_credits - 1 : 0;
+              }
+            } catch (aiErr) {
+              await logger.append("ERROR", `AI template choice failed: ${aiErr.message}. Falling back to the first template.`);
+            }
+          }
+          if (!template) template = roleTemplates[0];
+        }
+        // ai-write needs no template at all — content is resolved from scratch below.
+
+        // Attachments: one resume (this role's own resume_id override, else the candidate's
+        // global_resume_id) — every job sent for this role shares the same attachment regardless of send
+        // mode. See resolveRoleAttachments() in lib/emailResolve.js.
+        const roleFiles = resolveRoleAttachments(roleDef, candidateProfileRow).all;
+        const resumeLabelForLog = describeFiles(roleFiles);
+
+        let subject;
+        let text;
+        let templateLabelForLog;
+
+        if (sendMode === "ai-write") {
+          if (!aiEnabled || !(user.ai_credits > 0)) {
+            await logger.append("WARN", `Role "${recipient.role}" is set to "Let AI write" but AI is off or you're out of credits. Skipping recipient ${recipient.email}.`);
+            continue;
+          }
+          let result;
+          try {
+            result = await generateAiPersonalizedEmail(user.candidate_info, recipient, recipient.context_text, null, profile, aiTemperature);
+          } catch (aiErr) {
+            await logger.append("ERROR", `AI write failed for ${recipient.email}: ${aiErr.message}. Skipping.`);
+            continue;
+          }
+          if (result && result.skip) {
+            await logger.append("INFO", `AI skipped ${recipient.email}: ${result.reason || "not a relevant job post"}.`);
+            await supabase.from("automailsend_recipients").update({ status: "failed" }).eq("id", recipient.id);
+            await supabase.from("automailsend_sent_log").insert({
+              user_id: userId,
+              email: recipient.email || recipient.phone || "Unknown",
+              role: recipient.role,
+              title: recipient.title,
+              status: "skipped",
+              error_message: result.reason || "AI determined this wasn't a relevant job opportunity.",
+            });
+            continue;
+          }
+          if (!result || !result.subject || !result.body) {
+            await logger.append("ERROR", `AI write returned an empty email for ${recipient.email}. Skipping.`);
+            continue;
+          }
+          const spent = await spendAiCredit(supabase, userId);
+          user.ai_credits = spent ? user.ai_credits - 1 : 0;
+          subject = result.subject;
+          text = result.body;
+          templateLabelForLog = "AI-written (no template)";
+        } else {
+          if (!template.subject || !template.content) {
+            await logger.append("WARN", `Missing template for role ${recipient.role}. Skipping recipient ${recipient.email}.`);
+            continue;
+          }
+          // The template's own words, only variables filled in — ai-select already spent its (one)
+          // credit above just choosing WHICH template, never rewriting its content.
+          subject = applyPlaceholders(template.subject, recipient, profile);
+          text = applyPlaceholders(template.content, recipient, profile);
+          templateLabelForLog = template.label;
         }
 
         if (!recipient.email) {
@@ -182,37 +282,18 @@ async function runAutomailJobs(supabase) {
             title: recipient.title,
             status: "failed",
             error_message: "No email address found",
+            template_label: templateLabelForLog,
+            resume_label: resumeLabelForLog,
           });
           continue;
         }
 
-        let subject = applyPlaceholders(template.subject, recipient);
-        let text = applyPlaceholders(template.content, recipient);
-        let shouldSkip = false;
-        let skipReason = null;
-
-        if (aiProvider !== "none" && aiApiKey) {
-          try {
-            await logger.append("INFO", `Generating AI personalization for ${recipient.email}...`);
-            const aiContent = await generateAiPersonalizedEmail(aiProvider, aiApiKey, aiPrompt, recipient, recipient.context_text, template);
-            
-            if (aiContent && aiContent.skip) {
-              shouldSkip = true;
-              skipReason = aiContent.reason || "AI decided to skip based on context.";
-              await logger.append("WARN", `AI Skip: ${skipReason}`);
-            } else if (aiContent && aiContent.subject && (aiContent.body || aiContent.html)) {
-              subject = aiContent.subject;
-              text = aiContent.body || aiContent.html;
-              await logger.append("SUCCESS", `AI personalization successful!`);
-            } else {
-              await logger.append("WARN", `AI returned invalid format, falling back to template. Response: ${JSON.stringify(aiContent)}`);
-            }
-          } catch (aiErr) {
-            await logger.append("ERROR", `AI generation failed: ${aiErr.message} - ${aiErr.response?.data ? JSON.stringify(aiErr.response.data) : ''}. Falling back to template.`);
-          }
-        }
-
-        if (shouldSkip) {
+        // Hard guardrail: never send an email that still contains a literal unresolved {{...}} token
+        // (e.g. a template used {{candidate_phone}} but the profile field is empty, or the AI echoed a
+        // token verbatim). Blocked, not delivered — and no SMTP quota is spent, since we `continue`
+        // before the send attempt below rather than entering the try/finally that decrements it.
+        if (hasUnresolvedPlaceholders(subject) || hasUnresolvedPlaceholders(text)) {
+          await logger.append("ERROR", `Blocked send to ${recipient.email}: unresolved template variable(s) found in the final email.`);
           await supabase.from("automailsend_recipients").update({ status: "failed" }).eq("user_id", userId).eq("email", recipient.email);
           await supabase.from("automailsend_sent_log").insert({
             user_id: userId,
@@ -221,20 +302,20 @@ async function runAutomailJobs(supabase) {
             title: recipient.title,
             subject: subject,
             body: text,
-            status: "skipped",
-            error_message: skipReason,
+            status: "failed",
+            error_message: "Blocked: unresolved template variable(s) — email not sent.",
+            template_label: templateLabelForLog,
+            resume_label: resumeLabelForLog,
           });
           continue;
         }
 
         let status = "failed";
         let errorMsg = null;
+        let messageId = null;
 
-        const fromEmail = config.fromEmail || email;
-        const fromName = config.fromName;
-        
         const isHtmlBlock = /<html|<body|<!DOCTYPE|<style|<div|<p|<table|<ul|<ol|<li|<h[1-6]|<br|<hr|<blockquote/i.test(text);
-        
+
         let finalHtml = "";
         let finalText = "";
 
@@ -256,16 +337,17 @@ async function runAutomailJobs(supabase) {
           finalText = text;
         }
 
+        const fromEmail = account.fromEmail || account.email;
         const mailOptions = {
-          from: fromName ? `"${fromName}" <${fromEmail}>` : fromEmail,
+          from: account.fromName ? `"${account.fromName}" <${fromEmail}>` : fromEmail,
           to: recipient.email,
           subject,
           text: finalText,
           html: finalHtml,
         };
 
-        if (template.files && template.files.length > 0) {
-          mailOptions.attachments = template.files.map(a => ({
+        if (roleFiles.length > 0) {
+          mailOptions.attachments = roleFiles.map(a => ({
             filename: a.name,
             href: a.url,
             contentType: a.type,
@@ -273,14 +355,23 @@ async function runAutomailJobs(supabase) {
         }
 
         try {
-          await transporter.sendMail(mailOptions);
+          if (!transporters.has(account.id)) {
+            transporters.set(account.id, buildTransporter(account, decryptPassword));
+          }
+          const info = await transporters.get(account.id).sendMail(mailOptions);
+          messageId = info && info.messageId ? info.messageId : null;
           status = "sent";
           sentCount++;
-          await logger.append("SUCCESS", `Sent email to ${recipient.email}`);
+          await logger.append("SUCCESS", `Sent email to ${recipient.email} via ${account.label || account.email}`);
         } catch (err) {
           status = "failed";
           errorMsg = err.message;
-          await logger.append("ERROR", `Failed to send to ${recipient.email}: ${err.message}`);
+          await logger.append("ERROR", `Failed to send to ${recipient.email} via ${account.label || account.email}: ${err.message}`);
+        } finally {
+          // Decrement on failure too, not just success — otherwise a persistently broken account
+          // (bad credentials, etc.) keeps being picked as "most remaining" for every recipient
+          // instead of the pool rotating to a working account.
+          account.remaining -= 1;
         }
 
         // Update recipient status
@@ -303,17 +394,21 @@ async function runAutomailJobs(supabase) {
             status,
             error_message: errorMsg,
             sent_at: new Date().toISOString(),
+            smtp_account_id: account.id,
+            template_label: templateLabelForLog,
+            resume_label: resumeLabelForLog,
+            message_id: messageId,
           });
 
         if (delaySec > 0) {
           // Anti-ban Jitter: Randomize delay by +/- 20%
-          const jitter = Math.random() * 0.4 - 0.2; 
+          const jitter = Math.random() * 0.4 - 0.2;
           const actualDelayMs = (delaySec * 1000) * (1 + jitter);
           await logger.append("INFO", `Waiting ${Math.round(actualDelayMs / 1000)}s before next email...`);
           await sleep(actualDelayMs);
         }
       }
-      
+
       await logger.finish("success", `Finished batch. Sent: ${sentCount}`);
     }
   } catch (err) {

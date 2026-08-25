@@ -1,6 +1,6 @@
-# AutoMailSend
+# Cuneihire
 
-Next.js app to send bulk emails with Nodemailer. Recipients can be tagged by role (DevOps, Fullstack, AI Automation, Custom), each with its own subject, body, and attachments. Supports per-email delay and JSON email extraction.
+Next.js app to send bulk emails with Nodemailer. Recipients can be tagged by a user-defined role, each with its own subject, body, and attachments. Supports per-email delay and JSON email extraction.
 
 ## Setup
 

@@ -54,29 +54,190 @@ function extractLineTexts(chunk) {
   return lines;
 }
 
+function extractEmailsFrom(text) {
+  const found = [];
+  MAILTO_RE.lastIndex = 0;
+  let mm;
+  while ((mm = MAILTO_RE.exec(text)) !== null) found.push(mm[1].toLowerCase());
+  const standard = text.match(EMAIL_RE) || [];
+  for (const e of standard) found.push(e.toLowerCase());
+  return [...new Set(found.filter((e) => !e.includes('linkedin.com')))];
+}
+
+function extractPhonesFrom(text) {
+  const candidates = [];
+  const localMatches = text.match(LOCAL_MOBILE_RE) || [];
+  candidates.push(...localMatches);
+  CONTEXT_PHONE_RE.lastIndex = 0;
+  let cm;
+  while ((cm = CONTEXT_PHONE_RE.exec(text)) !== null) candidates.push(cm[0]);
+  return [...new Set(candidates.map(cleanPhoneNumber).filter(Boolean))];
+}
+
+// ---------------------------------------------------------------------------
+// Per-post attribution (added 2026-08-17)
+//
+// LinkedIn's content-search response embeds one big JSON array
+// (`window.__como_rehydration__ = [ "id:content", "id:content", ... ]`) which, once properly
+// JSON.parsed and concatenated, is itself a stream of "<hexId>:<value>\n<hexId>:<value>\n..."
+// chunks (a React-Server-Components-style wire format) — some chunks are raw post metadata
+// (author, activityId, postSlugUrl), others are the actual rendered UI tree (where contact info
+// like an email in "apply by emailing X" text actually lives). A chunk holding a contact's text
+// typically references its owning post's metadata chunk directly via a "$<id>" prop within a few
+// hops — validated against a real captured sample (see docs/memory.md for how this was derived).
+//
+// This gives each contact its OWN post's url/text instead of the old behavior of stamping every
+// contact found on a page with the concatenation of every post found on that page.
+// ---------------------------------------------------------------------------
+
+function parseComoChunks(rawStr) {
+  try {
+    const startMarker = 'window.__como_rehydration__ = [';
+    const startIdx = rawStr.indexOf(startMarker);
+    if (startIdx === -1) return null;
+
+    const arrayStart = startIdx + startMarker.length - 1;
+    const nextScriptIdx = rawStr.indexOf('<script', startIdx + startMarker.length);
+    const arraySlice = rawStr.slice(arrayStart, nextScriptIdx === -1 ? undefined : nextScriptIdx);
+    const lastBracket = arraySlice.lastIndexOf(']');
+    if (lastBracket === -1) return null;
+
+    const parsedArray = JSON.parse(arraySlice.slice(0, lastBracket + 1));
+    const full = parsedArray.join('');
+
+    const chunkRe = /(?:^|\n)([0-9a-f]+):/g;
+    const starts = [];
+    let m;
+    while ((m = chunkRe.exec(full)) !== null) {
+      starts.push({ id: m[1], headerIndex: m.index, contentStart: chunkRe.lastIndex });
+    }
+    if (starts.length === 0) return null;
+
+    const chunks = new Map();
+    for (let i = 0; i < starts.length; i++) {
+      const end = i + 1 < starts.length ? starts[i + 1].headerIndex : full.length;
+      const text = full.slice(starts[i].contentStart, end);
+      if (!chunks.has(starts[i].id)) chunks.set(starts[i].id, text);
+    }
+    return chunks;
+  } catch (err) {
+    return null;
+  }
+}
+
+function findPostsInChunks(chunks) {
+  const posts = [];
+  for (const [id, text] of chunks) {
+    const urlM = text.match(/"postSlugUrl":"([^"]+)"/);
+    if (!urlM) continue;
+    const actorM = text.match(/"actorName":"([^"]*)"/);
+    posts.push({ chunkId: id, url: urlM[1], actor: actorM ? actorM[1] : '' });
+  }
+  return posts;
+}
+
+function referencersOf(chunks, targetId) {
+  const re = new RegExp('\\$L?' + targetId + '\\b');
+  const res = [];
+  for (const [id, text] of chunks) {
+    if (id === targetId) continue;
+    if (re.test(text)) res.push(id);
+  }
+  return res;
+}
+
+// Walk up the reference tree from a contact's chunk, looking for the post it belongs to: either a
+// direct hit on a post's own metadata chunk, or an ancestor chunk that mentions a known post's
+// author name. Returns { post, ancestorChunkIds } or null if nothing was found within maxDepth hops
+// (an honest "unknown" — never a guess).
+function findOwningPost(chunks, startChunkId, posts, maxDepth = 6) {
+  const postChunkIds = new Set(posts.map((p) => p.chunkId));
+  let frontier = [startChunkId];
+  const visited = new Set(frontier);
+  const path = [];
+
+  for (let depth = 1; depth <= maxDepth; depth++) {
+    const next = [];
+    for (const id of frontier) {
+      for (const r of referencersOf(chunks, id)) {
+        if (!visited.has(r)) {
+          visited.add(r);
+          next.push(r);
+        }
+      }
+    }
+    path.push(...next);
+
+    for (const id of next) {
+      if (postChunkIds.has(id)) {
+        return { post: posts.find((p) => p.chunkId === id), ancestorChunkIds: path };
+      }
+    }
+    for (const id of next) {
+      const text = chunks.get(id);
+      const hit = posts.find((p) => p.actor && text.includes(p.actor));
+      if (hit) return { post: hit, ancestorChunkIds: path };
+    }
+
+    if (next.length === 0) return null;
+    frontier = next;
+  }
+  return null;
+}
+
+function contextTextFor(chunks, contactChunkId, ancestorChunkIds) {
+  const pieces = [contactChunkId, ...(ancestorChunkIds || []).slice(0, 2)]
+    .map((id) => chunks.get(id))
+    .filter(Boolean)
+    .flatMap((text) => extractLineTexts(text));
+  const joined = [...new Set(pieces)].join(' ').trim();
+  return joined ? joined.slice(0, 2000) : null;
+}
+
+// Primary extraction path: per-post-attributed contacts. Returns null if the page doesn't match the
+// expected wire format (caller should fall back to the legacy page-level extractors below).
+function extractContactsWithAttribution(rawStr) {
+  const chunks = parseComoChunks(rawStr);
+  if (!chunks) return null;
+
+  const posts = findPostsInChunks(chunks);
+  if (posts.length === 0) return null;
+
+  const groups = [];
+  for (const [chunkId, text] of chunks) {
+    if (posts.some((p) => p.chunkId === chunkId)) continue; // skip raw metadata chunks themselves
+    const emails = extractEmailsFrom(text);
+    const phones = extractPhonesFrom(text);
+    if (emails.length === 0 && phones.length === 0) continue;
+
+    const owner = findOwningPost(chunks, chunkId, posts);
+    groups.push({
+      emails,
+      phones,
+      source_url: owner ? owner.post.url : null,
+      contextText: owner ? contextTextFor(chunks, chunkId, owner.ancestorChunkIds) : null,
+      // The post's author (`actorName`) was already being read to help find the owning post above —
+      // previously discarded once attribution succeeded. Kept here so it can be saved and used to
+      // address a real person instead of the AI guessing a name from noisy post text. Empty string
+      // from LinkedIn (anonymous/hidden actor) is treated the same as "unknown".
+      authorName: owner && owner.post.actor ? owner.post.actor : null,
+    });
+  }
+
+  return { groups, postsFound: posts.length };
+}
+
+// --- Legacy page-level extractors (fallback when the wire format above isn't recognized, e.g. the
+// paginated-results endpoint hasn't been validated against a live sample yet). Known limitation:
+// stamps every contact found on the page with every post URL found on the page — see
+// docs/architecture.md / docs/memory.md. ---
+
 function extractInitialContacts(rawStr) {
   const decodedBuffers = decodeBufferData(rawStr);
   const cleanText = unescapePayload(rawStr + ' ' + decodedBuffers);
-  
-  const foundEmails = [];
-  MAILTO_RE.lastIndex = 0;
-  let mailtoMatch;
-  while ((mailtoMatch = MAILTO_RE.exec(cleanText)) !== null) {
-    foundEmails.push(mailtoMatch[1].toLowerCase());
-  }
-  const standardEmails = cleanText.match(EMAIL_RE) || [];
-  for (const e of standardEmails) foundEmails.push(e.toLowerCase());
-  const uniqueEmails = [...new Set(foundEmails)];
 
-  const candidatePhones = [];
-  const localMatches = cleanText.match(LOCAL_MOBILE_RE) || [];
-  candidatePhones.push(...localMatches);
-  CONTEXT_PHONE_RE.lastIndex = 0;
-  let contextMatch;
-  while ((contextMatch = CONTEXT_PHONE_RE.exec(cleanText)) !== null) {
-    candidatePhones.push(contextMatch[0]);
-  }
-  const uniquePhones = [...new Set(candidatePhones.map(cleanPhoneNumber).filter(Boolean))];
+  const uniqueEmails = extractEmailsFrom(cleanText);
+  const uniquePhones = extractPhonesFrom(cleanText);
 
   const urlMatches = cleanText.match(/"postSlugUrl"\s*:\s*"([^"]+)"/g) || [];
   const uniqueUrls = [...new Set(urlMatches.map(m => m.match(/"postSlugUrl"\s*:\s*"([^"]+)"/)[1]))];
@@ -88,18 +249,7 @@ function extractInitialContacts(rawStr) {
 function extractPaginatedContacts(rawStr) {
   // 1. Extract emails from the ENTIRE decoded payload (safe because EMAIL_RE is very specific)
   const cleanText = unescapePayload(rawStr + ' ' + decodeBufferData(rawStr));
-  const foundEmails = [];
-  
-  MAILTO_RE.lastIndex = 0;
-  let mailtoMatch;
-  while ((mailtoMatch = MAILTO_RE.exec(cleanText)) !== null) {
-    foundEmails.push(mailtoMatch[1].toLowerCase());
-  }
-  
-  const standardEmails = cleanText.match(EMAIL_RE) || [];
-  for (const e of standardEmails) foundEmails.push(e.toLowerCase());
-  
-  const emails = [...new Set(foundEmails)];
+  const emails = extractEmailsFrom(cleanText);
 
   // 2. Extract phones only from human-readable text nodes to avoid random JSON numbers
   const text = extractLineTexts(rawStr).join('\n').replace(/\n{3,}/g, '\n\n').trim();
@@ -132,6 +282,7 @@ function extractPaginatedContacts(rawStr) {
 }
 
 module.exports = {
+  extractContactsWithAttribution,
   extractInitialContacts,
   extractPaginatedContacts
 };

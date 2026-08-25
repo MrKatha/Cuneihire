@@ -74,7 +74,7 @@ export function ExecutionLogsPanel({ userId }: { userId: string }) {
             setLogs((prev) => [payload.new as ExecutionLog, ...prev]);
           } else if (payload.eventType === "UPDATE") {
             const updatedLog = payload.new as ExecutionLog;
-            
+
             // Check if we should notify
             if (updatedLog.status === "success" && updatedLog.details) {
                const newEmails = updatedLog.details.new_emails?.length || 0;
@@ -83,7 +83,8 @@ export function ExecutionLogsPanel({ userId }: { userId: string }) {
                  toast.success(`Scraper found ${newEmails} new emails and ${newPhones} new phones!`);
                }
             } else if (updatedLog.status === "error") {
-               toast.error("Scraper execution failed!");
+               const label = updatedLog.details?.jobType === "automail" ? "Automail" : "Scraper";
+               toast.error(`${label} execution failed!`);
             }
 
             setLogs((prev) =>
@@ -153,7 +154,7 @@ export function ExecutionLogsPanel({ userId }: { userId: string }) {
   const getStatusClass = (status: string) => {
     switch (status.toLowerCase()) {
       case "running":
-        return "text-blue-400";
+        return "text-[var(--accent)]";
       case "success":
         return "text-[var(--ok)]";
       case "error":

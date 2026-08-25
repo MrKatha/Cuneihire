@@ -5,6 +5,7 @@ import { supabase } from "@/lib/supabase";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Eye, EyeOff, ArrowLeft } from "lucide-react";
+import HexMark from "@/components/ui/HexMark";
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
@@ -32,13 +33,13 @@ export default function LoginPage() {
 
   return (
     <main className="flex items-center justify-center p-4 w-full h-full my-auto flex-grow relative">
-      <Link href="/" className="absolute top-6 left-6 md:top-10 md:left-10 flex items-center gap-2 text-sm font-medium text-gray-500 hover:text-gray-900 transition-colors">
+      <Link href="/" className="absolute top-6 left-6 md:top-10 md:left-10 flex items-center gap-2 text-sm font-medium transition-colors" style={{ color: 'var(--muted)' }}>
         <ArrowLeft size={16} /> Back to Home
       </Link>
-      <div className="w-full max-w-md p-8 bg-[var(--bg-panel)] rounded-2xl border border-[var(--line)] shadow-2xl backdrop-blur-md">
+      <div className="w-full max-w-md p-8 bg-[var(--bg-panel)] border border-[var(--line)]">
         <Link href="/" className="text-center mb-8 flex flex-col items-center hover:opacity-80 transition-opacity block">
-          <img src="/logo.png" alt="Viddr Logo" className="w-12 h-12 rounded-xl mb-4 shadow-sm" />
-          <h1 className="text-3xl font-bold text-gray-900 mb-2 tracking-tight">Viddr</h1>
+          <HexMark variant="outline" size={48} className="mb-4" />
+          <h1 className="text-3xl font-bold mb-2 tracking-tight" style={{ color: 'var(--ink)', fontFamily: 'var(--font-display), Georgia, serif' }}>Cuneihire</h1>
         </Link>
         <div className="text-center mb-8">
           <p className="text-[var(--muted)]">Welcome back. Please sign in to continue.</p>
