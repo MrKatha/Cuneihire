@@ -115,7 +115,12 @@ ${contextText || "No context provided."}`
 // else any more, and dead multi-provider branching is exactly the kind of stale code this project's own
 // docs warn against elsewhere. generateAiPersonalizedEmail, chooseTemplateForJob, and scoreJobMatch
 // (below) all go through this.
-const GEMINI_MODEL = "gemini-1.5-flash";
+// 2026-08-25: "gemini-1.5-flash" was retired from the API — every call had been 404ing (confirmed via
+// GET /v1beta/models against the live key) since before this key was even configured, so this was never
+// actually verified working end to end. Using the "-latest" alias instead of pinning a version, on
+// purpose — this exact bug (a hardcoded model name silently going stale with a 404 that only shows up in
+// server logs, invisible to the candidate) is the class of bug worth designing away, not just fixing once.
+const GEMINI_MODEL = "gemini-flash-latest";
 
 // Rate limiting (2026-08-25, operator ask — "we need to have the API rate limiting") — every one of this
 // backend's three workers (automail, batchSend, scraper) can loop over many recipients/posts in one run,

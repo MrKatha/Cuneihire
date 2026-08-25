@@ -25,7 +25,9 @@ function truncateForPrompt(text: string, maxLen: number): string {
   return text.length > maxLen ? `${text.slice(0, maxLen)}\n[...truncated]` : text;
 }
 
-const GEMINI_MODEL = "gemini-1.5-flash";
+// See ai.service.js (KEEP IN SYNC) — "gemini-1.5-flash" was retired from the API (confirmed 404 against
+// the live key, 2026-08-25); using the "-latest" alias on purpose so this doesn't silently go stale again.
+const GEMINI_MODEL = "gemini-flash-latest";
 
 // Rate limiting (2026-08-25, operator ask) — mirrors ai.service.js's MIN_GEMINI_INTERVAL_MS (KEEP IN
 // SYNC), but weaker here by nature: each request is its own serverless invocation, so this module-level
