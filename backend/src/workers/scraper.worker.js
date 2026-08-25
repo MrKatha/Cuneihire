@@ -20,7 +20,7 @@ function roleHasCriteria(role) {
   return Boolean(
     (role.work_mode && role.work_mode !== "any") ||
     (role.employment_type && role.employment_type !== "any") ||
-    (role.company_size && role.company_size !== "any") ||
+    (Array.isArray(role.company_sizes) && role.company_sizes.length > 0) ||
     (role.visa_sponsorship && role.visa_sponsorship !== "any") ||
     role.salary_min != null ||
     role.salary_max != null ||

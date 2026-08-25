@@ -262,7 +262,11 @@ function buildRoleCriteriaBlock(role) {
   const lines = [];
   if (r.work_mode && r.work_mode !== "any") lines.push(`Work mode: ${r.work_mode}`);
   if (r.employment_type && r.employment_type !== "any") lines.push(`Employment type: ${r.employment_type}`);
-  if (r.company_size && r.company_size !== "any") lines.push(`Company size: ${r.company_size}`);
+  // company_sizes (2026-08-26) — a multi-select; company_size (singular) is the retired single-select
+  // column, no longer read here. Any one of the listed sizes counts as a match, not all of them.
+  if (Array.isArray(r.company_sizes) && r.company_sizes.length > 0) {
+    lines.push(`Company size: ${r.company_sizes.join(" or ")}`);
+  }
   if (r.visa_sponsorship && r.visa_sponsorship !== "any") lines.push(`Visa sponsorship: ${r.visa_sponsorship}`);
   if (r.salary_min != null || r.salary_max != null) {
     const currency = r.salary_currency || "USD";

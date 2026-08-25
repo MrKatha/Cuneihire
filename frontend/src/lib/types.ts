@@ -7,7 +7,21 @@ export type Role = string;
 export type WorkMode = "remote" | "onsite" | "hybrid" | "any";
 export type SalaryPeriod = "hourly" | "monthly" | "annual";
 export type EmploymentType = "full-time" | "part-time" | "contract" | "internship" | "any";
+// Legacy single-select value (2026-08-17) — retired from the UI 2026-08-26 in favor of RoleDef.companySizes
+// below (a checkbox multi-select: "select multiple company sizes... or skip enterprise" — operator ask).
+// Kept on the type/schema, never dropped — same "superseded, never dropped" precedent as every other
+// retired field in this project (see RoleDef.selectedFileIds).
 export type CompanySize = "startup" | "small" | "medium" | "large" | "enterprise" | "any";
+// The real, checkbox-able values a candidate can pick for RoleDef.companySizes — "any" isn't one of them
+// since an empty array already means "no restriction," same convention as excludeKeywords.
+export type CompanySizeOption = Exclude<CompanySize, "any">;
+export const COMPANY_SIZE_OPTIONS: { value: CompanySizeOption; label: string }[] = [
+  { value: "startup", label: "Startup" },
+  { value: "small", label: "Small" },
+  { value: "medium", label: "Medium" },
+  { value: "large", label: "Large" },
+  { value: "enterprise", label: "Enterprise" },
+];
 export type VisaSponsorship = "required" | "not-required" | "any";
 
 export type AvailabilityOption = "" | "immediate" | "2-weeks" | "1-month" | "3-plus-months";
@@ -23,7 +37,8 @@ export const AVAILABILITY_OPTIONS: { value: AvailabilityOption; label: string }[
 // "rules" — set together on the Jobs & Roles page. Email templates stay separate (RoleTemplates.tsx).
 // Deliberately fixed-option over free text wherever there's a common, enumerable set of choices (operator
 // directive, 2026-08-17) — keeps the fields the AI/matching logic consume consistent, and cheaper to
-// reason about, than open text. `otherNotes` is the one deliberate catch-all for the long tail.
+// reason about, than open text. `otherNotes` was the one deliberate catch-all for the long tail; retired
+// from the UI 2026-08-26 (confirmed it never actually reached the AI matcher or resume composer).
 //
 // Module selection (2026-08-19) — a role also carries which of the candidate's CandidateProfile items
 // (by id) get pulled into a resume composed for this role (see lib/resumeCompose.ts's composeResumeData).
@@ -76,9 +91,17 @@ export type RoleDef = {
   // (work-mode already covers remote/on-site/hybrid; this is purely geography).
   preferredLocations: string[];
   employmentType: EmploymentType;
+  // Legacy single-select — no longer read by the UI or the AI matcher, see CompanySize's comment above.
   companySize: CompanySize;
+  // Multi-select company size (2026-08-26, operator ask — "if I want to select multiple company sizes,
+  // like startup, medium, or large, or I want to skip enterprise, I need to have that"). Empty array =
+  // no restriction (matches on any company size), same "empty means unset" convention as excludeKeywords.
+  companySizes: CompanySizeOption[];
   visaSponsorship: VisaSponsorship;
   availability: AvailabilityOption;
+  // Retired from the Roles UI (2026-08-26, operator ask — never actually read by the AI matcher or resume
+  // composer, confirmed dead). Kept on the type/schema, never dropped, same precedent as CompanySize above
+  // — any value an existing role already has just stops being shown or editable.
   otherNotes: string;
   // "This prompt is for AI" (2026-08-25, operator ask) — free text read directly by scoreJobMatch's
   // prompt, e.g. "Only match low-code/no-code roles" or "exclude unpaid internships even if the keywords

@@ -768,3 +768,17 @@ alter table public.automailsend_app_state
 alter table public.automailsend_role_defs
   add column if not exists exclude_keywords text[] default '{}',
   add column if not exists ai_instructions text default '';
+
+-- 2026-08-26 (operator ask — "if I want to select multiple company sizes... or I want to skip enterprise,
+-- I need to have that"): company_size's single-select "any"-or-one-value column is retired from the UI in
+-- favor of company_sizes, a real multi-select. Backfilled from any existing single value so no one's prior
+-- selection is silently lost; company_size itself is left in place, unread going forward (same
+-- "superseded, never dropped" precedent as every other retired column here) rather than altered in place,
+-- since converting its type live carries real risk for no benefit over just adding the new column.
+alter table public.automailsend_role_defs
+  add column if not exists company_sizes text[] default '{}';
+
+update public.automailsend_role_defs
+  set company_sizes = array[company_size]
+  where company_size is not null and company_size <> 'any'
+    and (company_sizes is null or company_sizes = '{}');

@@ -4,10 +4,11 @@ import { useMemo, useState } from "react";
 import toast from "react-hot-toast";
 import {
   AVAILABILITY_OPTIONS,
+  COMPANY_SIZE_OPTIONS,
   SALARY_CURRENCIES,
   type AvailabilityOption,
   type CandidateProfile,
-  type CompanySize,
+  type CompanySizeOption,
   type EmploymentType,
   type ProfileSkill,
   type Recipient,
@@ -68,15 +69,6 @@ const EMPLOYMENT_TYPES: { value: EmploymentType; label: string }[] = [
   { value: "part-time", label: "Part-time" },
   { value: "contract", label: "Contract" },
   { value: "internship", label: "Internship" },
-];
-
-const COMPANY_SIZES: { value: CompanySize; label: string }[] = [
-  { value: "any", label: "Doesn't matter" },
-  { value: "startup", label: "Startup" },
-  { value: "small", label: "Small" },
-  { value: "medium", label: "Medium" },
-  { value: "large", label: "Large" },
-  { value: "enterprise", label: "Enterprise" },
 ];
 
 const VISA_OPTIONS: { value: VisaSponsorship; label: string }[] = [
@@ -266,6 +258,13 @@ export function JobsRolesTab({
   }, [recipients]);
 
   const active = roleDefs.find((d) => d.key === activeRole) || roleDefs[0];
+
+  function toggleCompanySize(value: CompanySizeOption) {
+    if (!active) return;
+    const current = active.companySizes;
+    const next = current.includes(value) ? current.filter((v) => v !== value) : [...current, value];
+    onUpdateRoleRules(active.id, { companySizes: next });
+  }
 
   type SelectionField = "selectedExperienceIds" | "selectedEducationIds" | "selectedProjectIds" | "selectedCertificationIds" | "selectedSkillIds";
   function toggleModule(field: SelectionField, id: string) {
@@ -523,15 +522,6 @@ export function JobsRolesTab({
 
           <div className="grid-2" style={{ marginTop: "0.75rem" }}>
             <label className="field">
-              <span>Company size</span>
-              <select
-                value={active.companySize}
-                onChange={(e) => onUpdateRoleRules(active.id, { companySize: e.target.value as CompanySize })}
-              >
-                {COMPANY_SIZES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
-              </select>
-            </label>
-            <label className="field">
               <span>Visa sponsorship</span>
               <select
                 value={active.visaSponsorship}
@@ -551,6 +541,27 @@ export function JobsRolesTab({
             </label>
           </div>
 
+          <div className="field" style={{ marginTop: "0.75rem" }}>
+            <span>Company size</span>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: "1rem", marginTop: "0.4rem" }}>
+              {COMPANY_SIZE_OPTIONS.map((s) => (
+                <label key={s.value} style={{ display: "flex", alignItems: "center", gap: "0.4rem", fontSize: "0.85rem" }}>
+                  <input
+                    type="checkbox"
+                    checked={active.companySizes.includes(s.value)}
+                    onChange={() => toggleCompanySize(s.value)}
+                  />
+                  {s.label}
+                </label>
+              ))}
+            </div>
+            <p className="hint compact" style={{ margin: "0.4rem 0 0" }}>
+              {active.companySizes.length === 0
+                ? "Nothing selected — no restriction, matches any company size."
+                : `Matches ${active.companySizes.length} of ${COMPANY_SIZE_OPTIONS.length} — uncheck any you want to skip.`}
+            </p>
+          </div>
+
           <div style={{ marginTop: "0.75rem" }}>
             <ChipListField
               label="Preferred countries / locations"
@@ -561,16 +572,6 @@ export function JobsRolesTab({
               onRemove={(v) => onUpdateRoleRules(active.id, { preferredLocations: active.preferredLocations.filter((l) => l !== v) })}
             />
           </div>
-
-          <label className="field stretch" style={{ marginTop: "0.75rem" }}>
-            <span>Other notes</span>
-            <textarea
-              rows={3}
-              value={active.otherNotes}
-              onChange={(e) => onUpdateRoleRules(active.id, { otherNotes: e.target.value })}
-              placeholder="Anything else worth noting for this role, not covered above"
-            />
-          </label>
 
           <div style={{ marginTop: "0.9rem" }}>
             <span className="hint compact" style={{ display: "block", marginBottom: "0.4rem" }}>

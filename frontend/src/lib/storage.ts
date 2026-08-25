@@ -333,6 +333,7 @@ function mapRoleDefRow(d: any): RoleDef {
     preferredLocations: d.preferred_locations || [],
     employmentType: (d.employment_type as RoleDef["employmentType"]) || "any",
     companySize: (d.company_size as RoleDef["companySize"]) || "any",
+    companySizes: d.company_sizes || [],
     visaSponsorship: (d.visa_sponsorship as RoleDef["visaSponsorship"]) || "any",
     availability: (d.availability as RoleDef["availability"]) || "",
     otherNotes: d.other_notes || "",
@@ -396,6 +397,7 @@ export async function saveRoleDef(
     if (def.preferredLocations !== undefined) payload.preferred_locations = def.preferredLocations;
     if (def.employmentType !== undefined) payload.employment_type = def.employmentType;
     if (def.companySize !== undefined) payload.company_size = def.companySize;
+    if (def.companySizes !== undefined) payload.company_sizes = def.companySizes;
     if (def.visaSponsorship !== undefined) payload.visa_sponsorship = def.visaSponsorship;
     if (def.availability !== undefined) payload.availability = def.availability;
     if (def.otherNotes !== undefined) payload.other_notes = def.otherNotes;
@@ -437,6 +439,7 @@ export async function saveRoleDef(
       preferred_locations: def.preferredLocations ?? [],
       employment_type: def.employmentType ?? "any",
       company_size: def.companySize ?? "any",
+      company_sizes: def.companySizes ?? [],
       visa_sponsorship: def.visaSponsorship ?? "any",
       availability: def.availability ?? "",
       other_notes: def.otherNotes ?? "",
