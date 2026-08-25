@@ -48,6 +48,9 @@ type Props = {
   onDeleteRole: (id: string) => void;
   onUpdateRoleRules: (id: string, patch: Partial<RoleDef>) => void;
   onUpdateStatus?: (id: string, field: "status" | "phone_status", newStatus: string) => Promise<void>;
+  // Admin-set plan override (2026-08-25) — caps TOTAL keywords across every role combined, on top of the
+  // pre-existing per-role MAX_CHIPS cap below. null = no override, unlimited (today's behavior).
+  maxKeywords: number | null;
 };
 
 const WORK_MODES: { value: WorkMode; label: string }[] = [
@@ -250,6 +253,7 @@ export function JobsRolesTab({
   onDeleteRole,
   onUpdateRoleRules,
   onUpdateStatus,
+  maxKeywords,
 }: Props) {
   const [showAddRole, setShowAddRole] = useState(false);
   const [newRoleLabel, setNewRoleLabel] = useState("");
@@ -382,6 +386,17 @@ export function JobsRolesTab({
     );
   }
 
+  // Account-wide keyword cap (2026-08-25) — on top of ChipListField's own per-role MAX_CHIPS limit.
+  const totalKeywords = roleDefs.reduce((sum, d) => sum + d.keywords.length, 0);
+  const atKeywordCap = maxKeywords != null && totalKeywords >= maxKeywords;
+  function handleAddKeyword(v: string) {
+    if (maxKeywords != null && totalKeywords >= maxKeywords) {
+      toast.error(`Your plan allows up to ${maxKeywords} keyword${maxKeywords === 1 ? "" : "s"} across all roles — remove one first, or ask an admin to raise the limit.`);
+      return;
+    }
+    onUpdateRoleRules(active.id, { keywords: [...active.keywords, v] });
+  }
+
   return (
     <section className="panel">
       <div className="panel-head">
@@ -439,9 +454,14 @@ export function JobsRolesTab({
             placeholder="e.g. automation engineer"
             values={active.keywords}
             emptyHint="No keywords yet — this role won't be searched until you add at least one."
-            onAdd={(v) => onUpdateRoleRules(active.id, { keywords: [...active.keywords, v] })}
+            onAdd={handleAddKeyword}
             onRemove={(v) => onUpdateRoleRules(active.id, { keywords: active.keywords.filter((k) => k !== v) })}
           />
+          {maxKeywords != null && (
+            <p className="hint compact" style={{ marginTop: "-0.3rem", color: atKeywordCap ? "var(--danger)" : undefined }}>
+              {totalKeywords} / {maxKeywords} keywords used across all roles{atKeywordCap ? " — limit reached" : ""}
+            </p>
+          )}
 
           <div className="grid-2" style={{ marginTop: "1rem" }}>
             <label className="field">

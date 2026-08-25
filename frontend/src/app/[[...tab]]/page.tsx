@@ -171,6 +171,10 @@ export default function Home() {
   const [automail, setAutomail] = useState(defaultState().automail);
   const [ai, setAi] = useState<AiConfig>(defaultState().ai);
   const [aiCredits, setAiCredits] = useState(defaultState().aiCredits);
+  // Manual per-user plan overrides (2026-08-25) — admin-granted, read-only from here. null = no override,
+  // same behavior as every other account. See storage.ts's PersistedState comment.
+  const [maxKeywords, setMaxKeywords] = useState(defaultState().maxKeywords);
+  const [minFetchIntervalOverride, setMinFetchIntervalOverride] = useState(defaultState().minFetchIntervalOverride);
   // Dashboard's daily-limit ceiling (2026-08-25) — admin-configurable, one global number for now (no
   // billing/plan system yet). Public route, no auth needed, same as allow_signups on the signup page.
   const [globalMaxDailyLimit, setGlobalMaxDailyLimit] = useState(100);
@@ -296,6 +300,8 @@ export default function Home() {
       setAutomail(saved.automail);
       setAi(saved.ai);
       setAiCredits(saved.aiCredits);
+      setMaxKeywords(saved.maxKeywords);
+      setMinFetchIntervalOverride(saved.minFetchIntervalOverride);
       setRoleDefs(saved.roleDefs);
       setSmtpAccounts(saved.smtpAccounts);
       setSending(saved.batchSendPending);
@@ -537,6 +543,8 @@ export default function Home() {
         automail,
         ai,
         aiCredits, // not saved in app_state — admin-granted, read-only from here
+        maxKeywords, // not saved in app_state — admin-granted, read-only from here
+        minFetchIntervalOverride, // not saved in app_state — admin-granted, read-only from here
         profile,
         batchSendPending: sending,
       }).then(() => {
@@ -953,6 +961,7 @@ export default function Home() {
               onDeleteRole={handleDeleteRole}
               onUpdateRoleRules={handleUpdateRoleRules}
               onUpdateStatus={handleUpdateRecipientStatus}
+              maxKeywords={maxKeywords}
             />
           )}
 
@@ -1188,6 +1197,7 @@ export default function Home() {
               onSave={setAutoFetch}
               roleDefs={roleDefs}
               onClose={() => setShowAutoFetch(false)}
+              minFetchIntervalOverride={minFetchIntervalOverride}
             />
           )}
 

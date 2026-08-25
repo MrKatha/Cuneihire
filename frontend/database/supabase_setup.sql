@@ -738,3 +738,23 @@ alter table public.automailsend_role_defs
 -- is min(this, their own automailsend_app_state.daily_mail_limit, their connected SMTP accounts' pool).
 alter table public.automailsend_global_settings
   add column if not exists max_daily_send_limit integer not null default 100;
+
+
+-- 2026-08-25 (operator ask — "limit the number of keywords in a package... limit the interval searches
+-- on those packages") — the first lever toward real plan tiers, scoped deliberately small for now: manual
+-- admin overrides per user, not a self-serve billing/packages system (that's real future work once this
+-- becomes "a complete SaaS product", per the operator). Both nullable — null means "no override, behave
+-- exactly as today" for every existing account, so this ships with zero behavior change until an admin
+-- explicitly sets one.
+--  - max_keywords: caps a candidate's TOTAL search keywords across every role combined (JobsRolesTab.tsx
+--    enforces it client-side; there's also a separate, pre-existing per-role cap of 15, MAX_CHIPS in that
+--    same file — this is an additional account-wide ceiling on top of that, not a replacement).
+--  - min_fetch_interval_override: this candidate's own floor for "Run interval (minutes)" in the LinkedIn
+--    Auto-Fetch config (AutoFetchModal.tsx), overriding the app's default 180-minute floor. Distinct from
+--    automailsend_global_settings.min_fetch_interval, which is a *global* floor applied to everyone with
+--    no override set — this is the per-user exception on top of that global default.
+alter table public.automailsend_app_state
+  add column if not exists max_keywords integer;
+
+alter table public.automailsend_app_state
+  add column if not exists min_fetch_interval_override integer;

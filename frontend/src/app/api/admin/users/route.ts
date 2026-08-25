@@ -51,7 +51,7 @@ export async function POST(req: Request) {
   if (!(await verifyAdmin(req))) return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
 
   try {
-    const { user_id, is_blocked, allowed_products, ai_credits, ats_ai_credits } = await req.json();
+    const { user_id, is_blocked, allowed_products, ai_credits, ats_ai_credits, max_keywords, min_fetch_interval_override } = await req.json();
     if (!user_id) throw new Error("user_id is required");
 
     const updateData: any = {};
@@ -59,6 +59,11 @@ export async function POST(req: Request) {
     if (allowed_products !== undefined) updateData.allowed_products = allowed_products;
     // Platform-managed AI credits (2026-08-18) — admin-granted only, no self-serve purchase yet.
     if (ai_credits !== undefined) updateData.ai_credits = ai_credits;
+    // Manual per-user plan overrides (2026-08-25) — null is a valid, meaningful value here ("clear the
+    // override, back to default"), distinct from undefined ("field not sent, don't touch it") — both
+    // pass through `!== undefined` correctly since JSON.parse preserves an explicit null.
+    if (max_keywords !== undefined) updateData.max_keywords = max_keywords;
+    if (min_fetch_interval_override !== undefined) updateData.min_fetch_interval_override = min_fetch_interval_override;
 
     let data: any = null;
     if (Object.keys(updateData).length > 0) {

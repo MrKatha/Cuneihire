@@ -14,6 +14,11 @@ type UserState = {
   // Recruiter portal (2026-08-19) — null means this user hasn't activated recruiter mode, distinct from
   // a recruiter with 0 credits. See automailsend_recruiter_profiles.
   ats_ai_credits: number | null;
+  // Manual per-user plan overrides (2026-08-25) — the first lever toward real plan tiers ("later on we
+  // will integrate it and turn it into a complete SaaS product" — operator). null = no override, this
+  // account behaves exactly like every other one. See supabase_setup.sql's section for the full reasoning.
+  max_keywords: number | null;
+  min_fetch_interval_override: number | null;
   created_at: string;
 };
 
@@ -227,6 +232,8 @@ export function AdminPortal() {
                   <th style={{ padding: "0.75rem 0.5rem" }}>Status</th>
                   <th style={{ padding: "0.75rem 0.5rem" }}>AI Credits</th>
                   <th style={{ padding: "0.75rem 0.5rem" }}>ATS Credits</th>
+                  <th style={{ padding: "0.75rem 0.5rem" }}>Max Keywords</th>
+                  <th style={{ padding: "0.75rem 0.5rem" }}>Min Fetch Interval</th>
                   <th style={{ padding: "0.75rem 0.5rem" }}>Actions</th>
                 </tr>
               </thead>
@@ -261,6 +268,24 @@ export function AdminPortal() {
                           onSaved={(userId, credits) => setUsers(users.map(x => x.user_id === userId ? { ...x, ats_ai_credits: credits } : x))}
                         />
                       )}
+                    </td>
+                    <td style={{ padding: "0.75rem 0.5rem" }}>
+                      <OverrideCell
+                        userId={u.user_id}
+                        field="max_keywords"
+                        value={u.max_keywords}
+                        unit="keywords"
+                        onSaved={(userId, value) => setUsers(users.map(x => x.user_id === userId ? { ...x, max_keywords: value } : x))}
+                      />
+                    </td>
+                    <td style={{ padding: "0.75rem 0.5rem" }}>
+                      <OverrideCell
+                        userId={u.user_id}
+                        field="min_fetch_interval_override"
+                        value={u.min_fetch_interval_override}
+                        unit="min"
+                        onSaved={(userId, value) => setUsers(users.map(x => x.user_id === userId ? { ...x, min_fetch_interval_override: value } : x))}
+                      />
                     </td>
                     <td style={{ padding: "0.75rem 0.5rem", display: "flex", gap: "0.5rem" }}>
                       <button
@@ -346,6 +371,88 @@ function CreditsCell({ userId, field, credits, onSaved }: { userId: string; fiel
       <button className="btn small" onClick={save} disabled={saving}>
         {saving ? "…" : "Set"}
       </button>
+    </span>
+  );
+}
+
+// Manual per-user plan overrides (2026-08-25) — "limit the number of keywords in a package... limit the
+// interval searches on those packages" (operator ask), scoped for now to admin-set overrides rather than
+// real self-serve billing tiers ("this is for now... later we will integrate it and turn it into a
+// complete SaaS product" — operator). Unlike CreditsCell, `null` is a real, meaningful state here ("no
+// override — this account behaves like everyone else"), not just "hasn't been set yet" — so this needs an
+// explicit way back to null, not just a numeric input.
+function OverrideCell({
+  userId,
+  field,
+  value,
+  unit,
+  onSaved,
+}: {
+  userId: string;
+  field: "max_keywords" | "min_fetch_interval_override";
+  value: number | null;
+  unit: string;
+  onSaved: (userId: string, value: number | null) => void;
+}) {
+  const [input, setInput] = useState(value == null ? "" : String(value));
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    setInput(value == null ? "" : String(value));
+  }, [value]);
+
+  async function post(body: Record<string, unknown>) {
+    setSaving(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const headers = {
+        "Content-Type": "application/json",
+        ...(session ? { "Authorization": `Bearer ${session.access_token}` } : {}),
+      };
+      const res = await fetch("/api/admin/users", { method: "POST", headers, body: JSON.stringify({ user_id: userId, ...body }) });
+      const data = await res.json();
+      if (data.success) {
+        toast.success("Updated.");
+        onSaved(userId, (body[field] as number | null) ?? null);
+      } else {
+        toast.error(data.error || "Failed to update");
+      }
+    } catch {
+      toast.error("Network error");
+    }
+    setSaving(false);
+  }
+
+  function save() {
+    const trimmed = input.trim();
+    if (!trimmed) { post({ [field]: null }); return; }
+    const n = Number(trimmed);
+    if (!Number.isFinite(n) || n < 0) {
+      toast.error("Enter a valid non-negative number, or clear it for no override.");
+      return;
+    }
+    post({ [field]: n });
+  }
+
+  return (
+    <span style={{ display: "inline-flex", gap: "0.3rem", alignItems: "center" }}>
+      <input
+        type="number"
+        min={0}
+        placeholder="Default"
+        value={input}
+        onChange={(e) => setInput(e.target.value)}
+        style={{ width: "70px", padding: "0.2rem 0.4rem" }}
+      />
+      <span className="hint compact" style={{ margin: 0 }}>{unit}</span>
+      <button className="btn small" onClick={save} disabled={saving}>
+        {saving ? "…" : "Set"}
+      </button>
+      {value != null && (
+        <button className="btn small ghost" onClick={() => post({ [field]: null })} disabled={saving} title="Clear override, back to default">
+          Clear
+        </button>
+      )}
     </span>
   );
 }

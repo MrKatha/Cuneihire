@@ -46,6 +46,11 @@ export type PersistedState = {
   ai: AiConfig;
   // Admin-granted, read-only from here. Set via the Admin Portal, never by the user themselves.
   aiCredits: number;
+  // Manual per-user overrides (2026-08-25) — the first lever toward real plan tiers, admin-set via
+  // AdminPortal.tsx, read-only from here. null means "no override, behave exactly like every other
+  // account" — see supabase_setup.sql's section for the full reasoning.
+  maxKeywords: number | null;
+  minFetchIntervalOverride: number | null;
   profile: CandidateProfile;
   batchSendPending: boolean;
 };
@@ -85,6 +90,8 @@ export function defaultState(): PersistedState {
       matchStrictness: 0,
     },
     aiCredits: 0,
+    maxKeywords: null,
+    minFetchIntervalOverride: null,
     // Loaded/saved separately via loadCandidateProfile/saveCandidateProfile (its own table, own section
     // below) — not part of the app_state round trip any more. Kept here only as the field's shape default.
     profile: emptyCandidateProfile(),
@@ -176,6 +183,8 @@ export async function loadState(userId: string): Promise<PersistedState> {
       matchStrictness: appState.ai_match_strictness || 0,
     };
     state.aiCredits = appState.ai_credits ?? 0;
+    state.maxKeywords = appState.max_keywords ?? null;
+    state.minFetchIntervalOverride = appState.min_fetch_interval_override ?? null;
     // profile is no longer read from app_state — see loadCandidateProfile below. The old candidate_*
     // columns here are left in place, unused, same precedent as every other superseded column this
     // project (delay_sec / old ai_prompt / app_state.config — see supabase_setup.sql section 27).

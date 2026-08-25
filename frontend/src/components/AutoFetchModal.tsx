@@ -11,7 +11,15 @@ type Props = {
   roleDefs: RoleDef[];
   onSave: (newConfig: AutoFetchConfig) => void;
   onClose: () => void;
+  // Admin-set plan override (2026-08-25) — this candidate's own floor for "Run interval (minutes)",
+  // overriding the app's default DEFAULT_MIN_INTERVAL_MIN below. null = no override, default floor.
+  minFetchIntervalOverride: number | null;
 };
+
+// The app's default floor absent any admin override — scraping this often already risks LinkedIn
+// temporarily blocking the account, since this hits LinkedIn using the candidate's own session cookie,
+// not an official API. See DEFAULT_MIN_INTERVAL_MIN's use below for where this is actually enforced.
+const DEFAULT_MIN_INTERVAL_MIN = 180;
 
 // Candidate-facing config, simplified (2026-08-25, operator ask — "the client does not need to know
 // these things"). Pagination limit/delay and the raw cookie/header plumbing are real settings the
@@ -23,9 +31,10 @@ type Props = {
 const DEFAULT_PAGINATION_LIMIT = 3;
 const DEFAULT_PAGINATION_DELAY_SEC = 10;
 
-export function AutoFetchModal({ config, roleDefs, onSave, onClose }: Props) {
+export function AutoFetchModal({ config, roleDefs, onSave, onClose, minFetchIntervalOverride }: Props) {
+  const effectiveMinInterval = minFetchIntervalOverride ?? DEFAULT_MIN_INTERVAL_MIN;
   const [enabled, setEnabled] = useState(config.enabled);
-  const [intervalMin, setIntervalMin] = useState(config.intervalMin || 180);
+  const [intervalMin, setIntervalMin] = useState(config.intervalMin || effectiveMinInterval);
   const [postAgeFilter, setPostAgeFilter] = useState<AutoFetchConfig["postAgeFilter"]>(config.postAgeFilter || "any");
 
   // Connection state — never hand-edited, only ever set by a real extraction (handleConnect) or carried
@@ -64,7 +73,7 @@ export function AutoFetchModal({ config, roleDefs, onSave, onClose }: Props) {
     const nextEnabled = overrides.enabled ?? enabled;
     return {
       enabled: nextEnabled && canEnable,
-      intervalMin: Math.max(180, intervalMin || 180),
+      intervalMin: Math.max(effectiveMinInterval, intervalMin || effectiveMinInterval),
       paginationLimit: config.paginationLimit || DEFAULT_PAGINATION_LIMIT,
       paginationDelaySec: config.paginationDelaySec || DEFAULT_PAGINATION_DELAY_SEC,
       liAt: liAt.trim(),
@@ -286,7 +295,7 @@ export function AutoFetchModal({ config, roleDefs, onSave, onClose }: Props) {
                 content={
                   <>
                     <p>How often should we check LinkedIn for new posts?</p>
-                    <p><strong>Recommendation:</strong> 5–10 minutes. Too low and LinkedIn may temporarily block your account.</p>
+                    <p><strong>Minimum: {effectiveMinInterval} minutes.</strong> This checks LinkedIn using your own session, not an official API — too low and LinkedIn may temporarily block your account.</p>
                   </>
                 }
               />
@@ -294,10 +303,10 @@ export function AutoFetchModal({ config, roleDefs, onSave, onClose }: Props) {
             <input
               id="tour-autofetch-interval"
               type="number"
-              min={180}
+              min={effectiveMinInterval}
               max={1440}
               value={intervalMin}
-              onChange={(e) => setIntervalMin(Number(e.target.value) || 180)}
+              onChange={(e) => setIntervalMin(Number(e.target.value) || effectiveMinInterval)}
             />
           </label>
 
