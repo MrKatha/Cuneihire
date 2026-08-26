@@ -5,11 +5,11 @@ import toast from "react-hot-toast";
 import {
   AVAILABILITY_OPTIONS,
   COMPANY_SIZE_OPTIONS,
+  EMPLOYMENT_TYPE_OPTIONS,
   SALARY_CURRENCIES,
+  WORK_MODE_OPTIONS,
   type AvailabilityOption,
   type CandidateProfile,
-  type CompanySizeOption,
-  type EmploymentType,
   type ProfileSkill,
   type Recipient,
   type ResumeCertification,
@@ -20,7 +20,6 @@ import {
   type RoleDef,
   type SalaryPeriod,
   type VisaSponsorship,
-  type WorkMode,
 } from "@/lib/types";
 import { AddProfileItemModal, type AddableSection } from "./AddProfileItemModal";
 
@@ -50,25 +49,10 @@ type Props = {
   maxKeywords: number | null;
 };
 
-const WORK_MODES: { value: WorkMode; label: string }[] = [
-  { value: "any", label: "Doesn't matter" },
-  { value: "remote", label: "Remote" },
-  { value: "onsite", label: "On-site" },
-  { value: "hybrid", label: "Hybrid" },
-];
-
 const SALARY_PERIODS: { value: SalaryPeriod; label: string }[] = [
   { value: "annual", label: "/ year" },
   { value: "monthly", label: "/ month" },
   { value: "hourly", label: "/ hour" },
-];
-
-const EMPLOYMENT_TYPES: { value: EmploymentType; label: string }[] = [
-  { value: "any", label: "Doesn't matter" },
-  { value: "full-time", label: "Full-time" },
-  { value: "part-time", label: "Part-time" },
-  { value: "contract", label: "Contract" },
-  { value: "internship", label: "Internship" },
 ];
 
 const VISA_OPTIONS: { value: VisaSponsorship; label: string }[] = [
@@ -134,6 +118,70 @@ function ChipListField({
         </div>
       )}
     </label>
+  );
+}
+
+// Same pill-with-× visual/UX as ChipListField above, but for picking from a fixed enum instead of typing
+// free text (2026-08-26, operator ask — "I wanted it to be similar to the country pill... I want you to
+// do similarly for the other fields" — work mode, employment type, company size). A dropdown + "Add"
+// stands in for ChipListField's text input (you can't "type" a company size), everything after that —
+// selected values rendered as removable pills — is identical. Generic over the option's value type so one
+// component serves all three fields.
+function MultiSelectChipField<T extends string>({
+  label,
+  options,
+  values,
+  emptyHint,
+  onAdd,
+  onRemove,
+}: {
+  label: string;
+  options: { value: T; label: string }[];
+  values: T[];
+  emptyHint: string;
+  onAdd: (value: T) => void;
+  onRemove: (value: T) => void;
+}) {
+  const [pending, setPending] = useState("");
+  const remaining = options.filter((o) => !values.includes(o.value));
+
+  function submit() {
+    if (!pending) return;
+    onAdd(pending as T);
+    setPending("");
+  }
+
+  return (
+    <div className="field">
+      <span>{label}</span>
+      <div style={{ display: "flex", gap: "0.5rem" }}>
+        <select
+          value={pending}
+          onChange={(e) => setPending(e.target.value)}
+          disabled={remaining.length === 0}
+          style={{ flex: 1 }}
+        >
+          <option value="">{remaining.length === 0 ? "All added" : "Choose..."}</option>
+          {remaining.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+        </select>
+        <button type="button" className="btn" onClick={submit} disabled={!pending}>Add</button>
+      </div>
+      {values.length === 0 ? (
+        <p className="hint compact">{emptyHint}</p>
+      ) : (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: "0.4rem", marginTop: "0.4rem" }}>
+          {values.map((v) => {
+            const opt = options.find((o) => o.value === v);
+            return (
+              <span key={v} className="chip" style={{ display: "flex", alignItems: "center", gap: "0.35rem" }}>
+                {opt ? opt.label : v}
+                <button type="button" onClick={() => onRemove(v)} style={{ background: "transparent", border: "none", color: "var(--muted)", cursor: "pointer", padding: 0 }}>×</button>
+              </span>
+            );
+          })}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -258,13 +306,6 @@ export function JobsRolesTab({
   }, [recipients]);
 
   const active = roleDefs.find((d) => d.key === activeRole) || roleDefs[0];
-
-  function toggleCompanySize(value: CompanySizeOption) {
-    if (!active) return;
-    const current = active.companySizes;
-    const next = current.includes(value) ? current.filter((v) => v !== value) : [...current, value];
-    onUpdateRoleRules(active.id, { companySizes: next });
-  }
 
   type SelectionField = "selectedExperienceIds" | "selectedEducationIds" | "selectedProjectIds" | "selectedCertificationIds" | "selectedSkillIds";
   function toggleModule(field: SelectionField, id: string) {
@@ -465,25 +506,26 @@ export function JobsRolesTab({
             </p>
           </label>
 
-          <div className="grid-2" style={{ marginTop: "1rem" }}>
-            <label className="field">
-              <span>Work mode</span>
-              <select
-                value={active.workMode}
-                onChange={(e) => onUpdateRoleRules(active.id, { workMode: e.target.value as WorkMode })}
-              >
-                {WORK_MODES.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
-              </select>
-            </label>
-            <label className="field">
-              <span>Employment type</span>
-              <select
-                value={active.employmentType}
-                onChange={(e) => onUpdateRoleRules(active.id, { employmentType: e.target.value as EmploymentType })}
-              >
-                {EMPLOYMENT_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
-              </select>
-            </label>
+          <div style={{ marginTop: "1rem" }}>
+            <MultiSelectChipField
+              label="Work mode"
+              options={WORK_MODE_OPTIONS}
+              values={active.workModes}
+              emptyHint="Nothing selected — no restriction, matches any work mode."
+              onAdd={(v) => onUpdateRoleRules(active.id, { workModes: [...active.workModes, v] })}
+              onRemove={(v) => onUpdateRoleRules(active.id, { workModes: active.workModes.filter((m) => m !== v) })}
+            />
+          </div>
+
+          <div style={{ marginTop: "0.75rem" }}>
+            <MultiSelectChipField
+              label="Employment type"
+              options={EMPLOYMENT_TYPE_OPTIONS}
+              values={active.employmentTypes}
+              emptyHint="Nothing selected — no restriction, matches any employment type."
+              onAdd={(v) => onUpdateRoleRules(active.id, { employmentTypes: [...active.employmentTypes, v] })}
+              onRemove={(v) => onUpdateRoleRules(active.id, { employmentTypes: active.employmentTypes.filter((t) => t !== v) })}
+            />
           </div>
 
           <label className="field" style={{ marginTop: "0.75rem" }}>
@@ -541,25 +583,15 @@ export function JobsRolesTab({
             </label>
           </div>
 
-          <div className="field" style={{ marginTop: "0.75rem" }}>
-            <span>Company size</span>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: "1rem", marginTop: "0.4rem" }}>
-              {COMPANY_SIZE_OPTIONS.map((s) => (
-                <label key={s.value} style={{ display: "flex", alignItems: "center", gap: "0.4rem", fontSize: "0.85rem" }}>
-                  <input
-                    type="checkbox"
-                    checked={active.companySizes.includes(s.value)}
-                    onChange={() => toggleCompanySize(s.value)}
-                  />
-                  {s.label}
-                </label>
-              ))}
-            </div>
-            <p className="hint compact" style={{ margin: "0.4rem 0 0" }}>
-              {active.companySizes.length === 0
-                ? "Nothing selected — no restriction, matches any company size."
-                : `Matches ${active.companySizes.length} of ${COMPANY_SIZE_OPTIONS.length} — uncheck any you want to skip.`}
-            </p>
+          <div style={{ marginTop: "0.75rem" }}>
+            <MultiSelectChipField
+              label="Company size"
+              options={COMPANY_SIZE_OPTIONS}
+              values={active.companySizes}
+              emptyHint="Nothing selected — no restriction, matches any company size."
+              onAdd={(v) => onUpdateRoleRules(active.id, { companySizes: [...active.companySizes, v] })}
+              onRemove={(v) => onUpdateRoleRules(active.id, { companySizes: active.companySizes.filter((s) => s !== v) })}
+            />
           </div>
 
           <div style={{ marginTop: "0.75rem" }}>

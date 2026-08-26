@@ -326,12 +326,14 @@ function mapRoleDefRow(d: any): RoleDef {
     keywords: d.keywords || [],
     excludeKeywords: d.exclude_keywords || [],
     workMode: (d.work_mode as RoleDef["workMode"]) || "any",
+    workModes: d.work_modes || [],
     salaryCurrency: d.salary_currency || "USD",
     salaryPeriod: (d.salary_period as RoleDef["salaryPeriod"]) || "annual",
     salaryMin: d.salary_min ?? null,
     salaryMax: d.salary_max ?? null,
     preferredLocations: d.preferred_locations || [],
     employmentType: (d.employment_type as RoleDef["employmentType"]) || "any",
+    employmentTypes: d.employment_types || [],
     companySize: (d.company_size as RoleDef["companySize"]) || "any",
     companySizes: d.company_sizes || [],
     visaSponsorship: (d.visa_sponsorship as RoleDef["visaSponsorship"]) || "any",
@@ -390,12 +392,14 @@ export async function saveRoleDef(
     if (def.keywords !== undefined) payload.keywords = def.keywords;
     if (def.excludeKeywords !== undefined) payload.exclude_keywords = def.excludeKeywords;
     if (def.workMode !== undefined) payload.work_mode = def.workMode;
+    if (def.workModes !== undefined) payload.work_modes = def.workModes;
     if (def.salaryCurrency !== undefined) payload.salary_currency = def.salaryCurrency;
     if (def.salaryPeriod !== undefined) payload.salary_period = def.salaryPeriod;
     if (def.salaryMin !== undefined) payload.salary_min = def.salaryMin;
     if (def.salaryMax !== undefined) payload.salary_max = def.salaryMax;
     if (def.preferredLocations !== undefined) payload.preferred_locations = def.preferredLocations;
     if (def.employmentType !== undefined) payload.employment_type = def.employmentType;
+    if (def.employmentTypes !== undefined) payload.employment_types = def.employmentTypes;
     if (def.companySize !== undefined) payload.company_size = def.companySize;
     if (def.companySizes !== undefined) payload.company_sizes = def.companySizes;
     if (def.visaSponsorship !== undefined) payload.visa_sponsorship = def.visaSponsorship;
@@ -432,12 +436,14 @@ export async function saveRoleDef(
       keywords: def.keywords ?? [],
       exclude_keywords: def.excludeKeywords ?? [],
       work_mode: def.workMode ?? "any",
+      work_modes: def.workModes ?? [],
       salary_currency: def.salaryCurrency ?? "USD",
       salary_period: def.salaryPeriod ?? "annual",
       salary_min: def.salaryMin ?? null,
       salary_max: def.salaryMax ?? null,
       preferred_locations: def.preferredLocations ?? [],
       employment_type: def.employmentType ?? "any",
+      employment_types: def.employmentTypes ?? [],
       company_size: def.companySize ?? "any",
       company_sizes: def.companySizes ?? [],
       visa_sponsorship: def.visaSponsorship ?? "any",

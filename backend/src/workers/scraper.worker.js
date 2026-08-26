@@ -18,8 +18,8 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 function roleHasCriteria(role) {
   if (!role) return false;
   return Boolean(
-    (role.work_mode && role.work_mode !== "any") ||
-    (role.employment_type && role.employment_type !== "any") ||
+    (Array.isArray(role.work_modes) && role.work_modes.length > 0) ||
+    (Array.isArray(role.employment_types) && role.employment_types.length > 0) ||
     (Array.isArray(role.company_sizes) && role.company_sizes.length > 0) ||
     (role.visa_sponsorship && role.visa_sponsorship !== "any") ||
     role.salary_min != null ||

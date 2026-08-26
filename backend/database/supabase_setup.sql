@@ -782,3 +782,21 @@ update public.automailsend_role_defs
   set company_sizes = array[company_size]
   where company_size is not null and company_size <> 'any'
     and (company_sizes is null or company_sizes = '{}');
+
+-- 2026-08-26 (operator follow-up, same day — "I wanted it to be similar to the country pill... I could be
+-- open to multiple types of employment, or I could be open to multiple types of work modes"): work_mode
+-- and employment_type get the same multi-select + pill-UI treatment as company_size above, for the same
+-- reasons — legacy singular columns kept, unread going forward, backfilled into the new arrays.
+alter table public.automailsend_role_defs
+  add column if not exists work_modes text[] default '{}',
+  add column if not exists employment_types text[] default '{}';
+
+update public.automailsend_role_defs
+  set work_modes = array[work_mode]
+  where work_mode is not null and work_mode <> 'any'
+    and (work_modes is null or work_modes = '{}');
+
+update public.automailsend_role_defs
+  set employment_types = array[employment_type]
+  where employment_type is not null and employment_type <> 'any'
+    and (employment_types is null or employment_types = '{}');

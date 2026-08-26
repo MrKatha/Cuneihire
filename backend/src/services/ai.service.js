@@ -260,10 +260,15 @@ Output ONLY this JSON shape: {"score": <integer 0-100>, "reasoning": "<one short
 function buildRoleCriteriaBlock(role) {
   const r = role || {};
   const lines = [];
-  if (r.work_mode && r.work_mode !== "any") lines.push(`Work mode: ${r.work_mode}`);
-  if (r.employment_type && r.employment_type !== "any") lines.push(`Employment type: ${r.employment_type}`);
-  // company_sizes (2026-08-26) — a multi-select; company_size (singular) is the retired single-select
-  // column, no longer read here. Any one of the listed sizes counts as a match, not all of them.
+  // work_modes/employment_types/company_sizes (2026-08-26) — all three multi-selects now; the singular
+  // work_mode/employment_type/company_size columns are retired, no longer read here. Any one of the
+  // listed values counts as a match, not all of them.
+  if (Array.isArray(r.work_modes) && r.work_modes.length > 0) {
+    lines.push(`Work mode: ${r.work_modes.join(" or ")}`);
+  }
+  if (Array.isArray(r.employment_types) && r.employment_types.length > 0) {
+    lines.push(`Employment type: ${r.employment_types.join(" or ")}`);
+  }
   if (Array.isArray(r.company_sizes) && r.company_sizes.length > 0) {
     lines.push(`Company size: ${r.company_sizes.join(" or ")}`);
   }

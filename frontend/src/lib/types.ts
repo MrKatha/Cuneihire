@@ -4,16 +4,38 @@
 // `string` everywhere) so the many existing `role: Role` annotations across this file didn't need touching.
 export type Role = string;
 
+// Legacy single-select value (2026-08-17) — retired from the UI 2026-08-26 in favor of RoleDef.workModes
+// below, a pill multi-select ("I could be open to multiple types of work modes" — operator ask, same pass
+// as companySizes/employmentTypes below). Kept on the type/schema, never dropped — same "superseded, never
+// dropped" precedent as every other retired field in this project (see RoleDef.selectedFileIds).
 export type WorkMode = "remote" | "onsite" | "hybrid" | "any";
+export type WorkModeOption = Exclude<WorkMode, "any">;
+export const WORK_MODE_OPTIONS: { value: WorkModeOption; label: string }[] = [
+  { value: "remote", label: "Remote" },
+  { value: "onsite", label: "On-site" },
+  { value: "hybrid", label: "Hybrid" },
+];
+
 export type SalaryPeriod = "hourly" | "monthly" | "annual";
+
+// Legacy single-select (2026-08-17) — retired from the UI 2026-08-26 in favor of RoleDef.employmentTypes
+// below ("I could be open to multiple types of employment" — operator ask). Same retirement precedent.
 export type EmploymentType = "full-time" | "part-time" | "contract" | "internship" | "any";
+export type EmploymentTypeOption = Exclude<EmploymentType, "any">;
+export const EMPLOYMENT_TYPE_OPTIONS: { value: EmploymentTypeOption; label: string }[] = [
+  { value: "full-time", label: "Full-time" },
+  { value: "part-time", label: "Part-time" },
+  { value: "contract", label: "Contract" },
+  { value: "internship", label: "Internship" },
+];
+
 // Legacy single-select value (2026-08-17) — retired from the UI 2026-08-26 in favor of RoleDef.companySizes
-// below (a checkbox multi-select: "select multiple company sizes... or skip enterprise" — operator ask).
-// Kept on the type/schema, never dropped — same "superseded, never dropped" precedent as every other
-// retired field in this project (see RoleDef.selectedFileIds).
+// below, a pill multi-select ("select multiple company sizes... or skip enterprise" — operator ask). Kept
+// on the type/schema, never dropped — same "superseded, never dropped" precedent as every other retired
+// field in this project (see RoleDef.selectedFileIds).
 export type CompanySize = "startup" | "small" | "medium" | "large" | "enterprise" | "any";
-// The real, checkbox-able values a candidate can pick for RoleDef.companySizes — "any" isn't one of them
-// since an empty array already means "no restriction," same convention as excludeKeywords.
+// The real, pickable values a candidate can pick for RoleDef.companySizes — "any" isn't one of them since
+// an empty array already means "no restriction," same convention as excludeKeywords.
 export type CompanySizeOption = Exclude<CompanySize, "any">;
 export const COMPANY_SIZE_OPTIONS: { value: CompanySizeOption; label: string }[] = [
   { value: "startup", label: "Startup" },
@@ -82,7 +104,11 @@ export type RoleDef = {
   // one of these, even though the post surfaced from an Include Keyword search. Existing rows default to
   // an empty list (nothing excluded), unchanged behavior.
   excludeKeywords: string[];
+  // Legacy single-select — no longer read by the UI or the AI matcher, see WorkMode's comment above.
   workMode: WorkMode;
+  // Multi-select work mode (2026-08-26, operator ask — "I could be open to multiple types of work
+  // modes"). Empty array = no restriction, same "empty means unset" convention as excludeKeywords.
+  workModes: WorkModeOption[];
   salaryCurrency: string;
   salaryPeriod: SalaryPeriod;
   salaryMin: number | null;
@@ -90,12 +116,18 @@ export type RoleDef = {
   // Countries/regions — a keyword-chip list, same add/remove UX as `keywords`, just a separate list
   // (work-mode already covers remote/on-site/hybrid; this is purely geography).
   preferredLocations: string[];
+  // Legacy single-select — no longer read by the UI or the AI matcher, see EmploymentType's comment above.
   employmentType: EmploymentType;
+  // Multi-select employment type (2026-08-26, operator ask — "I could be open to multiple types of
+  // employment"). Empty array = no restriction, same convention as workModes/companySizes.
+  employmentTypes: EmploymentTypeOption[];
   // Legacy single-select — no longer read by the UI or the AI matcher, see CompanySize's comment above.
   companySize: CompanySize;
   // Multi-select company size (2026-08-26, operator ask — "if I want to select multiple company sizes,
-  // like startup, medium, or large, or I want to skip enterprise, I need to have that"). Empty array =
-  // no restriction (matches on any company size), same "empty means unset" convention as excludeKeywords.
+  // like startup, medium, or large, or I want to skip enterprise, I need to have that"). Pill UI, same
+  // pattern as Preferred countries/locations below (2026-08-26 follow-up — "I wanted it to be similar to
+  // the country pill"). Empty array = no restriction (matches on any company size), same "empty means
+  // unset" convention as excludeKeywords.
   companySizes: CompanySizeOption[];
   visaSponsorship: VisaSponsorship;
   availability: AvailabilityOption;
