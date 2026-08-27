@@ -25,11 +25,20 @@
   redesign" section and its follow-ups),
   `EmailConfigTab` (2026-08-20, new — the Email Templates section's "Configuration" sub-tab: a role-tab bar
   + the `EMAIL_SEND_MODES` radios, moved out of `RoleTemplates`; three modes again — manual, "let AI
-  choose," and "let AI write it," the last restored the same day it was dropped, per operator ask), `JobsRolesTab` (per-role search keywords + job-search
+  choose," and "let AI write it," the last restored the same day it was dropped, per operator ask), `JobsRolesTab` (per-role search criteria + job-search
   rules + a "Modules for this role" checklist since 2026-08-19 — which of the profile's items this role
   pulls into a composed resume/attaches to its emails, each with select-all/select-none — five checklists
   (Experience/Education/Projects/Certifications/Skills; a sixth, Files, lived here briefly same-day before
-  moving to `ResumeConfigTab` on 2026-08-20) — + the matched-job-post board; its own
+  moving to `ResumeConfigTab` on 2026-08-20). The matched-job-post board that used to live at the bottom of
+  this page is gone (2026-08-26 — it duplicated what JAMS's Emails sub-tab already shows via `match_score`);
+  search criteria now split into Include Keywords (what's actually searched on LinkedIn) and Exclude
+  Keywords (AI-filtering signal only), plus a free-text "AI matching instructions" field read directly by
+  `scoreJobMatch`'s prompt with the highest priority of the three. Work mode, employment type, and company
+  size are all pill multi-selects (`MultiSelectChipField`, same pick-then-remove-the-pill UX as the
+  pre-existing "Preferred countries/locations" field) rather than single-select dropdowns — their old
+  singular `workMode`/`employmentType`/`companySize` columns are retired, unread, kept on the schema.
+  "Other notes" was removed from the UI same day (confirmed dead — never reached the AI matcher or resume
+  composer). Its own
   sidebar tab ("Roles"), separate from `ProfileTab`'s "My Profile" tab — briefly merged into one section
   with an internal toggle, reverted same day for easier navigation; the five module checklists are an
   accordion since 2026-08-20 — one `expandedModule` key in `JobsRolesTab`, not five independent toggles),
@@ -43,16 +52,27 @@
   experience/education/projects/certifications/skills/languages, reusing `ResumeBuilder`'s section editors
   — was just a 5-field contact card before, see [architecture.md](architecture.md)'s "Profile as knowledge
   base" section; briefly held a Files section same-day, moved to `ResumeConfigTab` on 2026-08-20 per
-  operator ask to keep everything resume-related on the Resumes tab), `JamsTab` (the unified
-  lifecycle hub — every contact found, bulk/per-row send actions with "queued" feedback, per-contact send
-  history, and a collapsible `ExecutionLogsPanel` for automation activity, all in one place; absorbed the
-  old `RecipientManager`, `SendPanel`, and `QuickSendTab`, which are deleted; also shows a "↩ Replied"
-  badge + the contact's actual reply thread now (2026-08-19, reply monitoring) — see
-  [architecture.md](architecture.md)), `QuickSendModal` (the "+ Quick Send" button's modal — HR contact
-  fields, a template picker (auto/custom/specific), attachments resolved from the role's own file
-  selection (no separate resume picker any more), AI enhance, sends
-  synchronously via `/api/send`), `AutomailModal` (background-sending mechanics only — enable + daily
-  limit; AI settings moved out, 2026-08-18), `AITab` (2026-08-18, new: its own sidebar tab — AI
+  operator ask to keep everything resume-related on the Resumes tab), `JamsHub` (2026-08-25, new — JAMS
+  became the app's landing page/tab, replacing the old standalone `DashboardTab` (deleted): owns the page-
+  level "JAMS" header and a 3-way Overview/Emails/Monitoring sub-tab strip. `JamsOverviewTab` (2026-08-25,
+  new) is the "what's working" snapshot — stat tiles, recent activity, by-role breakdown, the Quick Send
+  button; its own Automation card (checkbox/progress-bar/editable daily limit) was removed 2026-08-26 and
+  the control moved to `SettingsTab` (below) as a single Play/Pause toggle. `JamsTab` is the "Emails"
+  sub-tab — the unified lifecycle hub — every contact found, bulk/per-row send actions with "queued"
+  feedback, per-contact send history, and a collapsible `ExecutionLogsPanel` for automation activity
+  (`JamsHub`'s own "Monitoring" sub-tab also renders a bare `ExecutionLogsPanel`); absorbed the old
+  `RecipientManager`, `SendPanel`, and `QuickSendTab`, which are deleted; also shows a "↩ Replied" badge +
+  the contact's actual reply thread now (2026-08-19, reply monitoring) — see
+  [architecture.md](architecture.md)), `SettingsTab` (2026-08-25, rewritten 2026-08-26 — a flat card grid,
+  not tabs, matching `JamsOverviewTab`'s visual style: SMTP Accounts card (opens `SmtpConfigPanel`),
+  LinkedIn card (opens `AutoFetchModal`), an Automation card (Play/Pause toggle, added 2026-08-26 — replaces
+  the deleted `AutomailModal`), an Email section embedding `EmailConfigTab` (who writes each role's email),
+  a Resume card (plain pointer to the candidate's default resume, no AI-editing controls — deliberately
+  deferred), and an Account card (password change)), `QuickSendModal` (the "+ Quick Send" button's modal —
+  explicit compose-mode radios since 2026-08-25 ("let me write" / "let AI write" / "use a template", the
+  last with its own per-role template dropdown and an editable subject), attachments resolved from the
+  role's own file selection (no separate resume picker any more), sends synchronously via `/api/send`),
+  `AITab` (2026-08-18, new: its own sidebar tab — AI
   enable/disable, credit balance, temperature, and job-match strictness — see
   [architecture.md](architecture.md)'s "The AI tab" section), `AutoFetchModal` (LinkedIn scrape mechanics
   only — keywords live on `JobsRolesTab`), `AdminPortal` (2026-08-19: also grants ATS credits — see
@@ -118,7 +138,12 @@
   manual "Score with AI"), plus supporting modals/UI (`AttachmentPreviewModal`, `CookieHelpModal`,
   `HelpTooltip` (click-to-open modal reference), `HoverHint` (2026-08-19, new: pure-CSS hover popover —
   deliberately distinct from `HelpTooltip`, used by `ResumeBuilder`'s `MarkdownLiteField`), `AutoGrowTextarea`, `LandingPage`,
-  `JobPostCard`, `ui/HexMark` — the Cuneihire brand-mark primitive)
+  `JobPostCard`, `PdfPreviewModal` (2026-08-25, new: the resume Builder's "Preview as PDF" — a fully custom
+  non-interactive renderer, no browser PDF.js chrome; reuses `ResumeBuilder`'s own already-computed page
+  breaks rather than re-measuring, so the two surfaces can't disagree on page count), `ResumeSourceBadge`
+  (2026-08-25, new: small pill on `ResumeConfigTab`'s Library rows showing a resume's source — uploaded /
+  created from scratch / based on your profile — via `lib/resumeNaming.ts`'s `resumeSource()`),
+  `ui/HexMark` — the Cuneihire brand-mark primitive)
 - `src/lib/` — `crypto.ts` (encrypts SMTP/session secrets with `ENCRYPTION_KEY` — must match
   `backend/src/lib/crypto.js`), `placeholders.ts`/`aiClient.ts` (mirror
   `backend/src/services/ai.service.js`'s placeholder substitution and AI provider dispatch respectively,
@@ -166,8 +191,8 @@
   `resumeNaming.ts` (2026-08-20, new, second same-day follow-up: `isNameTaken`/`uniqueNameFallback` — the
   shared uniqueness guard every path that sets a resume's name goes through, so nothing can grab the wrong
   resume by name collision; see [architecture.md](architecture.md)),
-  `extractEmails.ts`, `jobPosts.ts`,
-  `redis.ts`, `storage.ts`, `supabase.ts`, `types.ts`
+  `extractEmails.ts`, `jobPosts.ts`, `companyEmail.ts`,
+  `redis.ts` (deprecated stub — Redis is no longer used in the frontend), `storage.ts`, `supabase.ts`, `types.ts`
 
 ## `backend/` (Node.js, CommonJS)
 - `src/index.js` — process entrypoint; graceful shutdown resets stuck locks/execution logs in Supabase
@@ -214,3 +239,12 @@
   **repurposed** (not renamed) as the candidate's unified files pool, while that table's other
   `global_resume_*` columns are unused — see [architecture.md](architecture.md)'s "Email Templates
   redesign" section and its same-day follow-up
+- `automailsend_role_defs.exclude_keywords`/`ai_instructions`/`company_sizes`/`work_modes`/
+  `employment_types` (all `text[]` except `ai_instructions`, 2026-08-25/26) — the AI-matching + pill-
+  multi-select columns; each has a retired singular predecessor (`company_size`/`work_mode`/
+  `employment_type`) still physically present, unread going forward, superseded not dropped, backfilled
+  once into the new array on migration — see [architecture.md](architecture.md)'s "Job matching" section
+- `automailsend_app_state.max_keywords`/`min_fetch_interval_override` (2026-08-25, both nullable integers)
+  — manual per-user admin overrides (a candidate's total keyword cap across all roles; their own floor for
+  the LinkedIn Auto-Fetch run interval, overriding the 180-minute global default) — the first lever toward
+  real plan tiers, set only via `AdminPortal`, never by the candidate themselves

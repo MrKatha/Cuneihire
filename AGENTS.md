@@ -20,7 +20,7 @@ Three independent folders, no root `package.json`/workspace — each has its own
 - Secrets (`ENCRYPTION_KEY`, Supabase service role key, Redis URL, etc.) come from environment variables. `backend/.env` and `frontend/.env.local` hold this project's actual Supabase credentials (gitignored, not in the global `~/.claude/secrets/credentials.env` — that file's own header says not to auto-save operator tokens there since the account is shared). `ENCRYPTION_KEY` and Redis are not yet set locally — ask before assuming a var's name or value.
 
 ## Deploy gotcha
-Pushing to `master`/`main` with changes under `backend/**` auto-deploys to production (`.github/workflows/backend-deploy.yml` SSHs in, runs `npm i`, `pm2 restart auto_apply_linkedin_backend`) — there is no test or lint gate in that pipeline, so backend changes reach prod as soon as they land on the default branch.
+`.github/workflows/backend-deploy.yml` is *supposed to* auto-deploy backend changes (push to `master`/`main` touching `backend/**` → SSH in, `npm i`, `pm2 restart auto_apply_linkedin_backend`, no test/lint gate) but **doesn't actually work today** — the repo has zero GitHub Actions secrets configured (`gh secret list` returns empty; the workflow references `SERVER_ROOT_PASSWORD`/`SERVER_IP`/`SERVER_USER`/`SERVER_PORT`/`SERVER_PRIVATE_KEY`, none set), so the run just fails. Every backend deploy is manual: SSH in and run `git pull && npm i && pm2 restart auto_apply_linkedin_backend --update-env`.
 
 ## Context docs
 Read on demand, not eagerly — each covers one concern:

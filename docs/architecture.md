@@ -106,16 +106,46 @@ actually having criteria set. Results (`match_score`/`match_reasoning`/`match_an
 reasoning as `author_name`/`context_text`/`source_url`). A transient AI failure leaves `match_analyzed_at`
 null so a future scrape run retries it, rather than getting stuck "analyzed" with no score.
 
-**Where matching lives in the UI (corrected 2026-08-18)**: matching is a *before-you-reach-out* question —
-does this scraped post actually fit what I'm looking for — so the browsable, scored job-post board lives on
-**`JobsRolesTab.tsx`** (Jobs & Roles), scoped to whichever role's tab is open, right below that role's own
-criteria editor. It groups that role's `recipients` by `job_post_id` into cards (match-score badge, AI
-reasoning, expandable snippet, source link, contacts) with a client-side strictness slider
-(`localStorage`-persisted, no schema needed) filtering by `match_score`; posts not yet scored (or whose
-role has no criteria) always stay visible, labeled "Not analyzed", never hidden or scored 0. The grouping
-logic (`groupRecipientsByJobPost`) and score→color/label mapping (`matchScoreTone`) live once in
-`frontend/src/lib/jobPosts.ts`, and the card itself in `frontend/src/components/JobPostCard.tsx`, shared
-with JAMS below so the two screens can't drift on what a given score means.
+**Where matching lives in the UI (corrected 2026-08-18, superseded 2026-08-26 — see follow-up below)**: the
+browsable, scored job-post board used to live on `JobsRolesTab.tsx` itself; that board is gone now — see
+below. The grouping logic (`groupRecipientsByJobPost`) and score→color/label mapping (`matchScoreTone`)
+still live once in `frontend/src/lib/jobPosts.ts`, and the card itself in
+`frontend/src/components/JobPostCard.tsx`, consumed only by `JamsTab.tsx`/`ApplicantsModal.tsx` now.
+
+### Follow-up (2026-08-26) — real AI-driven include/exclude filtering, not just structured-criteria scoring
+The actual scrape mechanism, confirmed end to end: LinkedIn is searched once per **Include Keyword**
+(`RoleDef.keywords`, unchanged — this is what hits LinkedIn's own search bar), every returned post is
+stored, then `scoreJobMatch` reads the raw text against the role's rules. What changed this pass is what
+that AI read considers:
+- **Exclude Keywords** (`RoleDef.excludeKeywords` / `exclude_keywords`) — never used to build the search
+  query (there's no "exclude" operator in play); purely an AI-filtering signal — a post genuinely about one
+  of these scores low (0-15) even though it surfaced from an Include Keyword search.
+- **AI matching instructions** (`RoleDef.aiInstructions` / `ai_instructions`) — free text the candidate
+  writes directly, e.g. "Only match low-code/no-code roles." Highest priority of the three — the updated
+  `JOB_MATCH_SYSTEM_PROMPT` explicitly tells the model to follow this over both Exclude Keywords and the
+  structured criteria when they conflict.
+- `buildRoleCriteriaBlock`/`scoreJobMatch` in `ai.service.js` gained `buildExcludeKeywordsBlock`/
+  `buildAiInstructionsBlock`; `scraper.worker.js`'s `roleHasCriteria` now also triggers scoring when either
+  of these two is set alone, even if every structured field is still `'any'`.
+
+**The board itself moved (2026-08-26, operator ask — "remove the match job posts from the roles as it is
+moved to JAMS")**: the "Matched job posts" card + strictness slider that used to sit at the bottom of
+`JobsRolesTab.tsx` is deleted outright — it duplicated what `JamsTab.tsx` (JAMS's "Emails" sub-tab) already
+shows per-contact via `matchScoreTone(r.match_score)`. `JobsRolesTab.tsx` is now purely the criteria editor;
+there's no second scored-post view anywhere else.
+
+**Role criteria fields became pill multi-selects (2026-08-25/26, operator ask — "if I want to select
+multiple company sizes... skip enterprise," then "I could be open to multiple types of employment... work
+modes")**: `company_size`/`work_mode`/`employment_type` (each a single-select `'any'`-or-one-value column)
+are retired — unread by the UI or `buildRoleCriteriaBlock` going forward, kept on the schema (same
+"superseded, never dropped" precedent as every other retired field in this project). `company_sizes`/
+`work_modes`/`employment_types` (`text[]`, empty = no restriction) replace them, edited via a new shared
+`MultiSelectChipField` component — same pill-with-× visual/UX as the pre-existing "Preferred countries"
+`ChipListField`, just picking from a fixed option list via a dropdown+Add instead of typing free text.
+`buildRoleCriteriaBlock` joins each array with "or" (`Work mode: remote or hybrid`) — any one of the listed
+values counts as a match, not all of them. Existing single selections were backfilled into the new arrays
+on migration, not lost. `other_notes` was removed from the Roles UI the same day — confirmed it never
+reached the AI matcher or resume composer, so it wasn't serving any purpose; field/column kept, unread.
 
 ## JAMS consolidation — the unified lifecycle hub (2026-08-18)
 Operator's target flow is: connect SMTP → scraper (plain LinkedIn API calls + parsing, no AI) finds HR
@@ -165,6 +195,58 @@ absorbed:
 mechanics, `AutomailModal` AI/automail config, password) stays separate — it's configuration, not lifecycle
 data, same reasoning as Jobs & Roles owning criteria vs. JAMS owning contacts.
 
+### Follow-up (2026-08-25/26) — Dashboard tab came and went; JAMS is the landing page again with sub-tabs; Settings rebuilt as a flat card grid
+Between 2026-08-18 and 2026-08-25 a separate `DashboardTab.tsx` existed as its own landing tab (stats,
+connections, automation toggle) alongside JAMS. The operator's later, more detailed ask ("the dashboard is
+looking more like a setting... keep JAMS as our main dashboard, with tabs — overall/stats, mails sent [the
+CRM], monitoring — and merge settings into a similar layout") collapsed that back down:
+- **`DashboardTab.tsx` is deleted.** `JamsHub.tsx` (new) is the actual landing component now — owns the
+  page-level "JAMS" header and an Overview/Emails/Monitoring sub-tab strip (local `useState`, no routing).
+  `JamsOverviewTab.tsx` (new) is "Overview" — stat tiles (sent today, total contacts/sent, replies, AI
+  credits), recent activity, by-role breakdown, the "+ Quick Send" button. `JamsTab.tsx` (unchanged
+  internally) became "Emails" — trimmed its own outer `<section className="panel">` wrapper since `JamsHub`
+  now owns that shell; its daily-limit chip moved inline into the body instead. "Monitoring" is a bare
+  `ExecutionLogsPanel`.
+- **`SettingsTab.tsx` was first rewritten as a tabbed page (Automation/Connections/Account), then corrected
+  same pass to a flat grid of bordered cards** — matching `JamsOverviewTab`'s own stat-tile/card visual
+  language rather than adding a second internal nav pattern (operator: "a similar layout to the dashboard").
+  Cards: SMTP Accounts (opens the same `SmtpConfigPanel` popup as always), LinkedIn (opens the same
+  `AutoFetchModal`), an Email section embedding `EmailConfigTab` (who writes each role's email — manual/let
+  AI choose/let AI write), a Resume card (a plain pointer to `profile.globalResumeId`'s file, deliberately
+  no AI-editing controls — see "explicitly out of scope" note below), and an Account card (password change).
+  The template libraries (Email Templates, Resumes) stay fully separate, exactly as before — Settings only
+  ever holds config/connections, never template content.
+- **Automation's control moved twice in two days.** First landed on `JamsOverviewTab` as a full card
+  (checkbox + progress bar + editable daily-limit input) when `DashboardTab` was folded in. Next day, per
+  operator ask ("move the automation section from JAMS to the settings... just have a quick toggle button,
+  like play or pause... forget about the whole section"), that whole card was deleted and replaced by a
+  single compact Automation card on `SettingsTab` — one Play/Pause button (toggles `automail.enabled`) +
+  read-only "Sent today: X / Y" text. The editable daily-limit input was dropped along with the rest of the
+  section, not preserved elsewhere.
+- **Explicitly deferred, not built**: a "Resume for AI" feature the operator described in detail — an
+  instance of a profile-based resume with per-field AI-editability toggles (locked: name/company/dates;
+  toggleable: summary/descriptions), auto-tailored per job description with an AI-chosen name. Operator:
+  "do not build this right now... add it to the phase after we build the admin portal." Roadmap as stated:
+  1) pricing/credit control/API hardening (mostly done — see the "Manual per-user plan overrides" and "API
+  hardening" sections), 2) an unresolved second phase (possibly the admin portal, never explicitly
+  confirmed), 3) this Resume-for-AI feature.
+
+## Manual per-user plan overrides (2026-08-25) — a stepping stone toward real plan tiers
+Explicitly scoped small by the operator ("this is for now — later we will integrate it and turn it into a
+complete SaaS product"), not a self-serve billing/packages system: two nullable admin-only override columns
+on `automailsend_app_state`, both `null` by default (zero behavior change until an admin sets one via
+`AdminPortal.tsx`'s new `OverrideCell`):
+- **`max_keywords`** — caps a candidate's total search keywords across every role combined.
+  `JobsRolesTab.tsx` enforces it client-side, stacked on top of the pre-existing per-role `MAX_CHIPS = 15`
+  cap (a separate, smaller ceiling that was already there).
+- **`min_fetch_interval_override`** — this candidate's own floor for the LinkedIn Auto-Fetch "Run interval
+  (minutes)" setting, overriding the app-wide 180-minute default (`AutoFetchModal.tsx`'s
+  `DEFAULT_MIN_INTERVAL_MIN`). Distinct from `automailsend_global_settings.min_fetch_interval`, a *global*
+  floor applied to everyone with no override set.
+- The API route pattern (`/api/admin/users/route.ts`) checks `!== undefined`, not `!== null`, when deciding
+  whether to touch these columns in a PATCH — an explicit `null` in the request body correctly *clears* an
+  override, distinct from the field simply not being sent.
+
 ## Quick Send's synchronous path + queued-send feedback (2026-08-18)
 Bulk/per-row sends in the JAMS table go through the backend's polling batch queue
 (`automailsend_app_state.batch_send_pending`/`config.batchMode`/`config.batchTargetIds`, consumed by
@@ -191,6 +273,14 @@ separate fixes:
   `sendList()` successfully hands a batch to the worker, cleared per-id once that recipient's `status`
   changes away from `"pending"` (arrives via the existing realtime subscription) or after a 90s safety-net
   timeout. A queued row shows "Queued — sending soon…" instead of its Send/Send AI/Resend buttons.
+
+### Follow-up (2026-08-25) — explicit compose modes, not an implicit default
+Previously Quick Send silently used whatever mode a role's `EmailConfigTab` setting implied. Operator ask:
+compose choice should be explicit, every time, in the modal itself. `QuickSendModal.tsx` gained a
+`ComposeMode` radio group ("write" / "ai" / "template" — same visual pattern as `EMAIL_SEND_MODES`); picking
+"template" reveals a dropdown scoped to the open role's own template pool (`selectTemplate(id)` populates
+subject/body); the subject field is now always editable regardless of mode (previously only in some modes).
+`enhance()` (the "Generate"/"Regenerate" AI action) works from an empty draft, not just a polish pass.
 
 ## Template library redesign — multiple templates + a separate resume library (2026-08-18)
 > **Superseded 2026-08-19** — the randomization mechanism described below (`pickFromPool`,
@@ -327,14 +417,50 @@ codebase yet).
   configured" path (plain template, no match score) and log it once per run, not per recipient.
 - **`AutomailModal.tsx`** lost the Provider/Model/API-Key fields entirely — the AI-specific section moved
   out to its own tab (below), leaving this modal solely about background-sending mechanics (enable +
-  daily limit). **Admin Portal** gained a per-user numeric "AI Credits" cell (`CreditsCell` in
-  `AdminPortal.tsx`) wired to `/api/admin/users/route.ts`'s existing per-user PATCH pattern (same shape as
-  `is_blocked`/`allowed_products`).
-- **Not yet live-verified** — no real Gemini key has been dropped into either `.env` file yet, so no
-  actual end-to-end AI call (personalize/enhance/import/score) has been tested against the real API. Build
-  + worker syntax-check only. The operator still needs to: provision a dedicated key at Google AI Studio,
-  add `GEMINI_API_KEY` to both `backend/.env` and `frontend/.env.local`, and set it in Vercel's production
-  env vars (outside this session's reach — the Vercel MCP isn't authorized here).
+  daily limit). *(2026-08-26: `AutomailModal.tsx` itself is now deleted — see "JAMS consolidation"'s
+  follow-up below for where the enable/daily-limit control lives today.)* **Admin Portal** gained a per-user
+  numeric "AI Credits" cell (`CreditsCell` in `AdminPortal.tsx`) wired to `/api/admin/users/route.ts`'s
+  existing per-user PATCH pattern (same shape as `is_blocked`/`allowed_products`).
+- **Live-verified (2026-08-25)** — a real dedicated `GEMINI_API_KEY` was provisioned at Google AI Studio and
+  set in `backend/.env`, `frontend/.env.local`, and Vercel's production env vars; a real AI-personalized
+  email was confirmed sent end to end (PM2 logs + a direct Supabase read showing pending→sent). See the
+  hardening follow-up immediately below for what that first real traffic surfaced.
+
+### Follow-up (2026-08-25) — API hardening: rate limiting, input truncation, timeouts, retired-model fix
+Getting a real key into production immediately surfaced two separate bugs, both root-caused with direct
+evidence rather than guessed:
+- **`gemini-1.5-flash` had been retired from the API** (confirmed via `GET /v1beta/models` against the live
+  key returning no such model) — every call had been 404ing since before this session, meaning platform-
+  managed AI had never actually worked end to end despite shipping 2026-08-18. Fixed by switching to the
+  `gemini-flash-latest` alias (not a pinned version) in both `ai.service.js` and `aiClient.ts` — deliberately
+  an alias so this exact class of bug (a hardcoded model name silently going stale, invisible until a real
+  key is in place) can't recur the same way.
+- **No rate limiting existed between Gemini calls** — three workers (`automail`, `batchSend`, `scraper`) can
+  each loop over many recipients/posts in one run with zero spacing between real network calls. Fixed with
+  one in-process throttle, `throttleGeminiCall()` inside `callAiJson` (both `ai.service.js` and its
+  `aiClient.ts` twin) — a single `MIN_GEMINI_INTERVAL_MS` (default 4200ms, env-overridable) gate that every
+  real Gemini attempt passes through, placed *after* the missing-key check (a zero-cost local fail that
+  shouldn't be throttled) but *before* each retry attempt. One choke point protects all three backend
+  workers since they all funnel through this one function; the existing 429 exponential backoff is the
+  residual safety net for the frontend's separate serverless process, which can't share this module-level
+  throttle.
+- **Free-tier daily quota is a separate, harder ceiling than per-minute rate limiting** (found 2026-08-26,
+  investigating "why do sends fail for some users") — a direct probe against the live key returned
+  `RESOURCE_EXHAUSTED`: `GenerateRequestsPerDayPerProjectPerModel-FreeTier`, quota value **20 requests/day**
+  for `gemini-3.7-flash` (what `gemini-flash-latest` currently resolves to), shared across every user on the
+  one platform-managed key. Once exhausted, every AI call 429s for the rest of the day; `ai-write` mode
+  recipients are silently skipped (not broken-sent) rather than failing loudly. **Operator decision
+  (2026-08-26): stay on the free tier deliberately** until the product has real users — plan is to apply for
+  Google startup credits once it ships, then move to a paid/pay-as-you-go tier. Not a bug to fix now.
+- **Input truncation**: `truncateForPrompt(text, maxLen)` caps any candidate-controlled free text before it
+  reaches a prompt (`candidateInfo` at 4000 chars, `aiInstructions` at 1000 chars) — defense against one huge
+  paste inflating every future Gemini call's cost/latency, independent of whatever a UI's own `maxLength`
+  enforces client-side. `ProfileTab.tsx`'s candidate-info textarea also gained a visible `maxLength` + a
+  live character-count hint.
+- **20s timeout** on every real Gemini call (both `axios.post`'s own `timeout` in the backend, and an
+  `AbortController`-based timeout in `aiClient.ts` — native `fetch` has no built-in timeout) — an unbounded
+  hang on one user's call would otherwise stall every other user's automation behind it in the same
+  `for (const user of users)` loop.
 
 ## The AI tab — temperature + match strictness (2026-08-18)
 Second half of the operator's original AI ask, completed once platform-managed AI/credits landed: AI gets
@@ -1517,6 +1643,15 @@ through individually confirming clean, non-duplicated, non-gapped atom-boundary 
 confirmed larger at both a 900px and a 1080px test-viewport height; a real Save through the actual PDF
 pipeline confirmed working end-to-end, test artifact cleaned up afterward. Clean `tsc --noEmit`; lint clean of
 new issues (only the same pre-existing idioms noted in every previous pass).
+
+## Resume source labels + per-category uniqueness (2026-08-25)
+Operator ask: tell resumes apart by where they came from, and stop silent name collisions within a
+category. `frontend/src/lib/resumeNaming.ts` gained `resumeSource(file): "upload" | "scratch" | "profile"`
+(checked via `Attachment.sourceResumeProfileId`/`sourceRoleId` — no new field needed, the source was already
+derivable) and `RESUME_SOURCE_LABELS`; `ResumeSourceBadge.tsx` (new) renders the label as a small pill on
+`ResumeConfigTab`'s Library rows. `isNameTaken`/`uniqueNameFallback` (pre-existing, from the 2026-08-20
+Resume Builder redesign) gained a `source` parameter — uniqueness is enforced **per category**, not
+globally, so "Resume" can exist once as an upload and once as a from-scratch build without colliding.
 
 ## Schema file (fixed 2026-08-17)
 `frontend/database/supabase_setup.sql` and `backend/database/supabase_setup.sql` used to be two independently

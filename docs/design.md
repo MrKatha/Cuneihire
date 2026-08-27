@@ -55,3 +55,12 @@
   reversal of the sequencing rule above for future feature work.
 - **Design work for this project stays local, never published as a Claude Artifact** (2026-08-17, operator
   directive) — see `docs/memory.md`.
+- **JAMS is the app's landing page (2026-08-25), replacing the old standalone Dashboard tab (deleted).**
+  Sidebar order now starts with JAMS. JAMS itself is Overview/Emails/Monitoring sub-tabs, not three separate
+  sidebar entries. **Settings is a flat grid of bordered cards (2026-08-26), not tabs** — same visual
+  language as JAMS's Overview stat-tile/card layout, deliberately: SMTP Accounts, LinkedIn, Automation
+  (Play/Pause), Email (who writes each role's email), Resume (a plain default-resume pointer, no AI
+  controls), Account. The template libraries (Email Templates, Resumes) stay fully separate — Settings only
+  holds config/connections, never content.
+- **Card convention**: `border: 1px solid var(--line); border-radius: 12px; padding: 1.25rem` — the
+  bordered-box look both JAMS's Overview and Settings use for every section.

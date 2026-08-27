@@ -43,13 +43,20 @@ copy only what a project needs into its gitignored `.env.local`.
   deployments that both call Gemini directly. Base URL override via `GEMINI_API_URL` if ever needed. See
   `backend/src/services/ai.service.js`, `frontend/src/lib/aiClient.ts`,
   `backend/src/lib/aiCredits.js`, and docs/architecture.md.
-- **PM2** — backend process manager on a remote host, deployed via SSH from CI on push to `master`/`main`
-  touching `backend/**` (`.github/workflows/backend-deploy.yml`) — no test/lint gate.
-- **Hosting target: AWS (operator directive, 2026-08-17)** — this project deploys to AWS, overriding the
-  operator's usual DigitalOcean+Vercel default stack from the seed above (a per-project override, not a
-  change to that global default — see `~/.claude/CLAUDE.md`'s own convention on this). Specific AWS
-  services/account not yet given — ask before assuming EC2 vs ECS vs Amplify/Elastic Beanstalk, or before
-  wiring anything AWS-specific (IAM, S3, Secrets Manager, etc.). Until specifics are known: avoid
-  Vercel-specific conventions (edge functions, `vercel.json`) and don't assume the current PM2/SSH backend
-  host above is or isn't already on AWS.
+- **PM2** — backend process manager on an AWS EC2 host (`i-0037d4bac1d0f1809`, `54.254.169.26`, user
+  `ubuntu`, app path `/srv/ismail_data/auto_apply_linkedin/backend`, PM2 process
+  `auto_apply_linkedin_backend`), reachable via SSH key `~/.claude/secrets/keys/cuneihire-backend-aws.pem`.
+  CI is *supposed* to deploy here on push to `master`/`main` touching `backend/**`
+  (`.github/workflows/backend-deploy.yml`) but doesn't actually work — zero GitHub secrets configured (see
+  `AGENTS.md`'s "Deploy gotcha"). Every deploy today is manual: SSH in, `git pull && npm i && pm2 restart
+  auto_apply_linkedin_backend --update-env`.
+- **Vercel — frontend hosting (2026-08-25, superseding the earlier "AWS-only, avoid Vercel" note below).**
+  The frontend IS deployed on Vercel after all: project `cuneihire` under scope `mrkathas-projects`,
+  git-connected (root directory `frontend`), custom domain `hire.cuneihive.com`. `.vercel/project.json`
+  lives inside `frontend/.vercel` (gitignored), which means `vercel deploy` from `frontend/` double-appends
+  the root dir and fails — use `vercel redeploy <deployment-url> --scope mrkathas-projects --target
+  production` to force a rebuild with fresh env vars, or just push to `master` and let the git integration
+  auto-deploy (this is a normal, working auto-deploy — unlike the backend's broken one above). So: backend
+  on AWS EC2 (manual SSH), frontend on Vercel (working git auto-deploy) — a genuine split-hosting setup, not
+  a single "hosting target."
 - **n8n / Telegram / Resend** from the seed above are not used in this project.

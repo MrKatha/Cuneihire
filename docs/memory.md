@@ -2,6 +2,54 @@
 
 Newest on top. Terse bullets only — done / in-progress / locked decisions / open items. Update every phase.
 
+- **2026-08-26 — DONE: pill multi-select for work mode/employment type/company size.** New shared
+  `MultiSelectChipField` in `JobsRolesTab.tsx` (pick-from-a-list-then-remove-the-pill, same visual as the
+  pre-existing "Preferred countries" chip field) replaces single-select dropdowns for all three — legacy
+  singular columns kept, unread, backfilled once into the new `text[]` arrays. Migrated live.
+- **2026-08-26 — DONE: AI include/exclude job matching; "Other notes" removed; matched-post board deleted
+  from Roles; Automation moved from JAMS to Settings as Play/Pause.** `RoleDef` gained `excludeKeywords`
+  and `aiInstructions` (highest-priority override in `scoreJobMatch`'s prompt); the duplicate "Matched job
+  posts" card on `JobsRolesTab.tsx` is gone (JAMS's Emails sub-tab already showed this); `otherNotes`
+  confirmed dead (never reached the AI matcher), removed from the UI, field/column kept. Settings gained a
+  compact Automation card (Play/Pause + read-only "sent today"); the full checkbox/progress-bar/editable-
+  limit card is deleted from `JamsOverviewTab.tsx` entirely — editable daily limit was NOT preserved
+  elsewhere, flagged to the operator, no ask yet to bring it back. Root-caused (not just theorized) a real
+  production quota wall while investigating: the platform Gemini key is free-tier, hard-capped at 20
+  requests/day for `gemini-3.7-flash` — confirmed via a direct probe returning `RESOURCE_EXHAUSTED`.
+  **Operator decision: stay on free tier deliberately until real users exist, then apply for startup
+  credits.** Not a bug — do not "fix" this without a fresh ask.
+- **2026-08-25 — DONE: JAMS becomes the landing page again; Settings rebuilt as a flat card grid.**
+  `DashboardTab.tsx` (a standalone landing tab that existed briefly) is deleted. New `JamsHub.tsx` owns the
+  page-level JAMS header + an Overview/Emails/Monitoring sub-tab strip; `JamsOverviewTab.tsx` is "Overview";
+  `JamsTab.tsx` (unchanged internally) is "Emails," trimmed of its own outer panel wrapper. `SettingsTab.tsx`
+  went through two shapes same day — first a tabbed draft (wrong, per operator correction), then the actual
+  flat bordered-card grid: SMTP Accounts, LinkedIn, Email (embeds `EmailConfigTab`), Resume (plain default
+  pointer, deliberately no AI controls), Account. **Explicitly deferred, not built**: a "Resume for AI"
+  feature (per-field AI-editability toggles on a profile-based resume, AI-tailored per job description) —
+  operator: "do not build this right now... add it to the phase after we build the admin portal." Their
+  stated roadmap: 1) pricing/credits/API (mostly done), 2) an unresolved second phase (never explicitly
+  confirmed — my interpretation is the admin portal, unconfirmed), 3) this Resume-for-AI feature.
+- **2026-08-25 — DONE: manual per-user plan overrides (`max_keywords`, `min_fetch_interval_override` on
+  `automailsend_app_state`), a deliberately small stepping stone, not real billing** — operator: "this is for
+  now... later we will integrate it and turn it into a complete SaaS product." Admin-only, via
+  `AdminPortal.tsx`'s new `OverrideCell`; both nullable, `null` = no override = today's behavior unchanged.
+- **2026-08-25 — DONE: AI infrastructure hardening (operator's explicit "Phase 1," ahead of an admin
+  portal "Phase 2").** Root-caused and fixed two real, previously-silent bugs on first real production
+  traffic: `gemini-1.5-flash` had been retired from the API (confirmed via a live `/v1beta/models` probe —
+  AI had never actually worked end to end since 2026-08-18 despite shipping), fixed by switching to the
+  `gemini-flash-latest` alias; zero rate limiting existed between Gemini calls across three workers sharing
+  one process, fixed with a single `throttleGeminiCall()` choke point in `ai.service.js`'s `callAiJson`
+  (mirrored in `aiClient.ts`, best-effort there since serverless). Also added: input truncation
+  (`truncateForPrompt`, 4000/1000 char caps), 20s timeouts (axios + `AbortController` for `fetch`, which has
+  no native timeout). A real Gemini key was provisioned and live-verified (a real AI-personalized email
+  confirmed sent, pending→sent in the DB).
+- **2026-08-25 — DONE: Quick Send explicit compose modes + per-category resume naming.**
+  `QuickSendModal.tsx` gained a `ComposeMode` radio ("write" / "ai" / "template," no more implicit default
+  from the role's own send-mode setting) and an always-editable subject field. `resumeNaming.ts` gained
+  `resumeSource()` (upload/scratch/profile, derived from existing `Attachment` fields — no new column) +
+  `ResumeSourceBadge.tsx` pill on Library rows; the existing name-collision guard now scopes uniqueness
+  **per source category**, not globally.
+
 - **2026-08-25** — **"Preview as PDF" page breaks now provably identical to the live editor (third same-day
   follow-up — operator ask: "the page breaks are messed up again... have some inspiration from the normal
   resume builder page preview... present the PDF as it is presenting it in the resume builder, just
