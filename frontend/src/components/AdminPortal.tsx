@@ -46,7 +46,14 @@ type OverviewData = {
   workerHealth: { jobType: string; lastRunAt: string | null; lastStatus: string | null }[];
 };
 
-export function AdminPortal() {
+type Props = {
+  // Threaded through from admin-panel/page.tsx's resolve-role check (2026-08-29) — not used for any
+  // internal gating yet (only super_admin is real today), just wired in now so future module-gating has
+  // somewhere to read from without another prop-plumbing pass later.
+  role: "super_admin" | "admin" | "employee";
+};
+
+export function AdminPortal({ role }: Props) {
   const [globalSettings, setGlobalSettings] = useState<GlobalSettings | null>(null);
   const [users, setUsers] = useState<UserState[]>([]);
   const [overview, setOverview] = useState<OverviewData | null>(null);
@@ -169,6 +176,10 @@ export function AdminPortal() {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+      <div style={{ display: "flex", justifyContent: "flex-end" }}>
+        <span className="hint compact" style={{ textTransform: "capitalize" }}>Signed in as {role.replace("_", " ")}</span>
+      </div>
+
       <div className="tabs" style={{ display: "flex", gap: "1rem", borderBottom: "1px solid var(--line)", paddingBottom: "0.5rem" }}>
         <button
           className={`btn ${activeTopTab === "overview" ? "primary" : "ghost"}`}

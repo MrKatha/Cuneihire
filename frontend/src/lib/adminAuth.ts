@@ -16,6 +16,11 @@ export async function verifyAdmin(req: Request) {
   const { data: { user }, error } = await supabaseAdmin.auth.getUser(token);
   if (error || !user) return false;
 
-  const adminEmails = (process.env.NEXT_PUBLIC_ADMIN_EMAILS || "").split(",");
-  return adminEmails.includes(user.email || "");
+  // Renamed from NEXT_PUBLIC_ADMIN_EMAILS (2026-08-29, admin subdomain task) — nothing reads this
+  // client-side any more (the in-SPA admin tab was removed), so there's no reason left to bake super-admin
+  // emails into the public client bundle. Still super-admin-only, unchanged otherwise — see
+  // resolve-role/route.ts for the admin/employee tiers this gates the existing routes against (deliberately
+  // not yet).
+  const superAdminEmails = (process.env.SUPER_ADMIN_EMAILS || "").split(",").map((e) => e.trim()).filter(Boolean);
+  return superAdminEmails.includes(user.email || "");
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
@@ -16,7 +16,15 @@ const EMAIL_ACTION_COOLDOWN_MS = 30_000;
 
 export default function LoginPage() {
   const [method, setMethod] = useState<Method>("password");
+  // This page is shared by both the main app and the admin subdomain (proxy.ts passes /login through
+  // untouched on both hosts) — staff accounts are provisioned by a super admin, not self-serve, so the
+  // "Sign Up" link/copy shouldn't appear there.
+  const [isAdminHost, setIsAdminHost] = useState(false);
   const router = useRouter();
+
+  useEffect(() => {
+    setIsAdminHost(window.location.hostname.startsWith("admin."));
+  }, []);
 
   // Password method
   const [email, setEmail] = useState("");
@@ -125,7 +133,9 @@ export default function LoginPage() {
           <h1 className="text-3xl font-bold mb-2 tracking-tight" style={{ color: 'var(--ink)', fontFamily: 'var(--font-display), Georgia, serif' }}>Cuneihire</h1>
         </Link>
         <div className="text-center mb-6">
-          <p className="text-[var(--muted)]">Welcome back. Please sign in to continue.</p>
+          <p className="text-[var(--muted)]">
+            {isAdminHost ? "Staff sign in." : "Welcome back. Please sign in to continue."}
+          </p>
         </div>
 
         <div className="flex gap-2 mb-6" style={{ borderBottom: '1px solid var(--line)' }}>
@@ -314,12 +324,14 @@ export default function LoginPage() {
           )
         )}
 
-        <p className="mt-6 text-center text-sm text-[var(--muted)]">
-          Don&apos;t have an account?{" "}
-          <Link href="/signup" className="text-[var(--accent)] hover:underline font-medium">
-            Sign Up
-          </Link>
-        </p>
+        {!isAdminHost && (
+          <p className="mt-6 text-center text-sm text-[var(--muted)]">
+            Don&apos;t have an account?{" "}
+            <Link href="/signup" className="text-[var(--accent)] hover:underline font-medium">
+              Sign Up
+            </Link>
+          </p>
+        )}
       </div>
     </main>
   );

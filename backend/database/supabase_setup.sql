@@ -825,3 +825,32 @@ alter table public.automailsend_role_defs
   add column if not exists match_keywords_negative text[] default '{}',
   add column if not exists match_keywords_source_snapshot text,
   add column if not exists match_keywords_generated_at timestamptz;
+
+-- Admin panel: dedicated subdomain + role tiers (2026-08-29) — super admin (env-var exact-email allowlist,
+-- SUPER_ADMIN_EMAILS, checked in code) is the only tier that's actually live yet. This table is the schema
+-- foundation for the other two (admin/employee) — no management UI writes to it this pass, no real accounts
+-- exist for it yet. Deliberately NOT a separate normalized "groups" table — `modules` is inlined directly on
+-- the staff row for now; promote to a real automailsend_staff_groups table only once multiple employees
+-- actually need to share a module-set, not before (operator: "we are at a very small stage to have modules
+-- ... act smart and build modules with time by yourself" — grow this organically as real admin features
+-- ship, don't speculate the full list now).
+create table if not exists public.automailsend_staff (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid references auth.users not null unique,
+  email text not null,
+  role text not null check (role in ('admin', 'employee')),
+  modules text[] default '{}', -- module identifiers this staff member can access; 'admin' role gets broad
+                                -- access per spec regardless of this list, only 'employee' is scoped by it
+  created_at timestamp with time zone default timezone('utc'::text, now()),
+  updated_at timestamp with time zone default timezone('utc'::text, now())
+);
+
+-- RLS enabled, zero policies — same "only the backend/admin-API service-role key ever touches this" pattern
+-- already used for automailsend_replies. Nothing here should ever be reachable via a regular user's own
+-- session.
+alter table public.automailsend_staff enable row level security;
+
+drop trigger if exists update_automailsend_staff_modtime on public.automailsend_staff;
+create trigger update_automailsend_staff_modtime
+before update on public.automailsend_staff
+for each row execute function update_modified_column();

@@ -34,7 +34,6 @@ import { AITab } from "@/components/AITab";
 import { JobBoardTab } from "@/components/JobBoardTab";
 import { RecruiterTab } from "@/components/RecruiterTab";
 import { LandingPage } from "@/components/LandingPage";
-import { AdminPortal } from "@/components/AdminPortal";
 import HexMark, { Wordmark } from "@/components/ui/HexMark";
 import { supabase } from "@/lib/supabase";
 import {
@@ -87,7 +86,10 @@ import {
 // selection) are two separate tabs again (2026-08-19, operator follow-up) — briefly merged into one
 // section with an internal sub-tab toggle, reverted for easier navigation: real sidebar entries beat a
 // toggle buried inside one page. See docs/architecture.md.
-const TAB_NAMES = ["emails", "profile", "roles", "board", "templates", "resumes", "ai", "settings", "recruiter", "admin"] as const;
+// "admin" removed (2026-08-29) — the admin panel moved to its own subdomain (admin.hire.cuneihive.com),
+// see proxy.ts + app/admin-panel/page.tsx. A stray /admin URL on the main app now just falls back to the
+// default tab below instead of showing a dead, unreachable panel.
+const TAB_NAMES = ["emails", "profile", "roles", "board", "templates", "resumes", "ai", "settings", "recruiter"] as const;
 type TabName = typeof TAB_NAMES[number];
 
 export default function Home() {
@@ -147,7 +149,6 @@ export default function Home() {
   };
   
   const [userId, setUserId] = useState<string | null>(null);
-  const [isAdmin, setIsAdmin] = useState(false);
   const [showLanding, setShowLanding] = useState(false);
   const devLoginAttempted = useRef(false);
   // TOTP challenge gate (2026-08-28, login/logout auth-flow rework) — set true when a session exists but
@@ -275,8 +276,6 @@ export default function Home() {
         setMfaRequired(false);
         setShowLanding(false);
         setUserId(session.user.id);
-        const adminEmails = (process.env.NEXT_PUBLIC_ADMIN_EMAILS || "").split(",");
-        setIsAdmin(adminEmails.includes(session.user.email || ""));
       });
     };
 
@@ -919,21 +918,6 @@ export default function Home() {
               right now. Signup's account-type toggle is disabled the same way (see signup/page.tsx), so
               no new recruiter accounts can be created either. The tab/route/RecruiterTab.tsx are all left
               intact for when that phase starts — this is a one-button revert. */}
-          {isAdmin && (
-            <button 
-              className={`sidebar-tab ${activeTab === 'admin' ? 'active' : ''}`}
-              onClick={() => handleTabChange('admin')}
-              style={{
-                color: "var(--danger)",
-                fontWeight: 650,
-                marginTop: '1rem',
-                border: "1px solid color-mix(in srgb, var(--danger) 30%, transparent)",
-                background: activeTab === 'admin' ? "color-mix(in srgb, var(--danger) 15%, transparent)" : "color-mix(in srgb, var(--danger) 5%, transparent)"
-              }}
-            >
-              Admin Portal 🛡️
-            </button>
-          )}
         </nav>
         
         <div style={{ marginTop: 'auto' }}>
@@ -1105,23 +1089,6 @@ export default function Home() {
               recruiterProfile={recruiterProfile}
               onSaveProfile={handleSaveRecruiterProfile}
             />
-          )}
-
-          {activeTab === 'admin' && isAdmin && (
-            <div className="panel flex-col gap-4">
-              <AdminPortal />
-            </div>
-          )}
-
-          {activeTab === 'admin' && !isAdmin && (
-            <div className="panel flex-col gap-4" style={{ textAlign: "center", padding: "4rem 2rem" }}>
-              <div style={{ fontSize: "3rem", marginBottom: "1rem" }}>🔒</div>
-              <h2 className="panel-title" style={{ color: "var(--err)" }}>Access Denied</h2>
-              <p className="hint">You do not have administrative privileges to view this portal.</p>
-              <button className="btn primary" onClick={() => handleTabChange('emails')} style={{ margin: "1rem auto 0" }}>
-                Return to JAMS
-              </button>
-            </div>
           )}
 
           {activeTab === 'settings' && (
