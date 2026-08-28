@@ -140,16 +140,19 @@ async function processJobLogic(job, logger, mappings, aiEnabled, aiCredits, aiTe
   // `roleDef` is the full role row (not just the key) — needed to score this post against its rules.
   const saveContacts = async (groups, roleToAssign, keyword, roleDef) => {
     for (const group of groups) {
-      // Resolve + score the job post FIRST, before the new-contact dedup check below — NOT after it
-      // (2026-08-28 root cause fix). Previously this whole block sat after an early `continue` for
-      // "no new emails/phones in this group," which meant a post whose contacts had already been
-      // captured on an earlier run (e.g. before AI matching worked, or before this role had any
-      // criteria set) could never be revisited for scoring again: every future run would rediscover
-      // the same already-known contacts, hit that early continue, and skip this block entirely. That's
-      // why the vast majority of scraped posts stayed "Not analyzed" forever even once AI was working —
-      // confirmed live: 28 job posts, only 3 had ever been scored. Scoring now always runs (subject to
-      // the same aiEnabled/credits/roleHasCriteria gates as before) regardless of whether this specific
-      // pass has anything new to insert.
+      // Dedup FIRST, before spending anything (2026-08-28, operator ask — checking "does this contact
+      // already exist" needs to happen as early as possible, before an AI credit is spent, not after).
+      // A group with nothing new in it costs nothing: no job-post upsert, no scoring call, no credit.
+      const newEmails = group.emails.filter(e => !allEmails.has(e.toLowerCase()));
+      const newPhones = group.phones.filter(p => !allPhones.has(p));
+      if (newEmails.length === 0 && newPhones.length === 0) continue;
+
+      // Resolve + score the job post only once we know there's actually something new to potentially
+      // insert. This DOES mean a post whose every contact was already captured before AI matching
+      // existed stays unscored by the live scraper going forward too — that's fine, since there's
+      // nothing left for a fresh score to change (nothing new to reject or insert). Catching up that
+      // kind of historical debt is a one-time backfill job, not something worth re-attempting on every
+      // single live run forever (see backend/backfill_match_scores.tmp.js in scratchpad).
       const jobPost = await getJobPost(group.source_url, group.contextText, group.authorName);
       const jobPostId = jobPost ? jobPost.id : null;
       let matchScore = jobPost ? jobPost.matchScore : null;
@@ -186,10 +189,6 @@ async function processJobLogic(job, logger, mappings, aiEnabled, aiCredits, aiTe
         await logger.append("WARN", `Out of AI credits — job posts won't be scored for the rest of this run.`);
         aiCreditsExhaustedLogged = true;
       }
-
-      const newEmails = group.emails.filter(e => !allEmails.has(e.toLowerCase()));
-      const newPhones = group.phones.filter(p => !allPhones.has(p));
-      if (newEmails.length === 0 && newPhones.length === 0) continue;
 
       // Enforce the match, don't just record it (2026-08-28, operator ask — "if the job does not match
       // the description I mentioned, do not get that job at all"). Reuses the same ai_match_strictness
