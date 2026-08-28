@@ -46,10 +46,11 @@ copy only what a project needs into its gitignored `.env.local`.
 - **PM2** — backend process manager on an AWS EC2 host (`i-0037d4bac1d0f1809`, `54.254.169.26`, user
   `ubuntu`, app path `/srv/ismail_data/auto_apply_linkedin/backend`, PM2 process
   `auto_apply_linkedin_backend`), reachable via SSH key `~/.claude/secrets/keys/cuneihire-backend-aws.pem`.
-  CI is *supposed* to deploy here on push to `master`/`main` touching `backend/**`
-  (`.github/workflows/backend-deploy.yml`) but doesn't actually work — zero GitHub secrets configured (see
-  `AGENTS.md`'s "Deploy gotcha"). Every deploy today is manual: SSH in, `git pull && npm i && pm2 restart
-  auto_apply_linkedin_backend --update-env`.
+  CI auto-deploys here on push to `master`/`main` touching `backend/**` (or manual `workflow_dispatch`) via
+  `.github/workflows/backend-deploy.yml` — fixed 2026-08-28 (was broken since it was first written, zero
+  secrets configured; see `AGENTS.md`'s "Deploy gotcha" for the fix and the `gh` multi-account gotcha).
+  Manual SSH deploy (`git pull && npm i && pm2 restart auto_apply_linkedin_backend --update-env`) still
+  works as a fallback.
 - **Vercel — frontend hosting (2026-08-25, superseding the earlier "AWS-only, avoid Vercel" note below).**
   The frontend IS deployed on Vercel after all: project `cuneihire` under scope `mrkathas-projects`,
   git-connected (root directory `frontend`), custom domain `hire.cuneihive.com`. `.vercel/project.json`
