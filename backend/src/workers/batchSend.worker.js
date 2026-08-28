@@ -95,14 +95,19 @@ async function processBatchSendJob(job) {
       roleDefByKey[r.key] = r;
     }
 
-    // 2. Fetch sent logs to filter out what has already been sent
+    // 2. Fetch sent logs to filter out what has already been sent. Keyed by email ALONE, not
+    // email::role (2026-08-28 fix, operator ask — "keep mail as the main criteria... we should not
+    // apply multiple times in a single mail" regardless of job title/role). Confirmed live: one real
+    // contact had 3 separate "sent" rows before this fix. A role is just which of the candidate's own
+    // search categories found a post — the same recruiter's inbox doesn't care which one, and getting
+    // the same application twice reads as spam, not enthusiasm.
     const { data: sentLog } = await supabase
       .from("automailsend_sent_log")
-      .select("email, role")
+      .select("email")
       .eq("user_id", user_id)
       .in("status", ["sent", "skipped"]);
 
-    const sentKeys = new Set((sentLog || []).map(s => `${s.email}::${s.role}`));
+    const sentEmails = new Set((sentLog || []).map(s => s.email.toLowerCase()));
 
     // 3. Check daily quota — the sum of remaining capacity across the whole SMTP pool
     const totalRemaining = pool.reduce((sum, a) => sum + Math.max(0, a.remaining), 0);
@@ -125,8 +130,8 @@ async function processBatchSendJob(job) {
         if (!config.batchTargetIds.includes(r.id)) continue;
       }
 
-      const key = `${r.email.toLowerCase()}::${r.role}`;
-      if (!sentKeys.has(key) && !uniqueMap.has(key)) {
+      const key = r.email.toLowerCase();
+      if (!sentEmails.has(key) && !uniqueMap.has(key)) {
         uniqueMap.set(key, r);
       }
     }

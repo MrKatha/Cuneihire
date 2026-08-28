@@ -130,12 +130,48 @@ async function runAutomailJobs(supabase) {
           uniquePendingMap.set(key, r);
         }
       }
-      const pending = Array.from(uniquePendingMap.values()).slice(0, totalRemaining);
+      let pending = Array.from(uniquePendingMap.values()).slice(0, totalRemaining);
 
       if (!pending || pending.length === 0) {
         // Silently skip if no emails to send
         continue;
       }
+
+      // Final "have we ever actually applied to this email before" gate (2026-08-28, operator ask —
+      // "keep mail as the main criteria... we should not apply multiple times in a single mail").
+      // uniquePendingMap above only catches a duplicate WITHIN this one fetched batch; this catches a
+      // duplicate ACROSS runs/roles — a second "pending" row for an email that already has a "sent"
+      // row elsewhere (confirmed live: one contact had 3 separate sent rows before this fix). Role never
+      // overrides this — the same recruiter's inbox doesn't care which of the candidate's own search
+      // categories found their post.
+      const pendingEmails = pending.filter((r) => r.email).map((r) => r.email.toLowerCase());
+      let alreadyAppliedEmails = new Set();
+      if (pendingEmails.length > 0) {
+        const { data: priorSends } = await supabase
+          .from("automailsend_sent_log")
+          .select("email")
+          .eq("user_id", userId)
+          .eq("status", "sent")
+          .in("email", pendingEmails);
+        alreadyAppliedEmails = new Set((priorSends || []).map((s) => s.email.toLowerCase()));
+      }
+      if (alreadyAppliedEmails.size > 0) {
+        const dupes = pending.filter((r) => r.email && alreadyAppliedEmails.has(r.email.toLowerCase()));
+        for (const dupe of dupes) {
+          await supabase.from("automailsend_recipients").update({ status: "failed" }).eq("id", dupe.id);
+          await supabase.from("automailsend_sent_log").insert({
+            user_id: userId,
+            email: dupe.email,
+            role: dupe.role,
+            title: dupe.title,
+            status: "skipped",
+            error_message: "Already applied to this contact before — not sending a second application.",
+          });
+        }
+        pending = pending.filter((r) => !(r.email && alreadyAppliedEmails.has(r.email.toLowerCase())));
+      }
+
+      if (pending.length === 0) continue;
 
       // We have work to do, initialize the logger
       const logger = new ExecutionLogger(userId, "automail");
