@@ -26,9 +26,15 @@ function roleHasCriteria(role) {
 }
 
 // Narrower than roleHasCriteria — does the role have anything the ALGORITHM specifically can check?
-// Excludes company_sizes (LinkedIn post text almost never states headcount), ai_instructions (arbitrary
-// free text, structurally unresolvable without real language understanding), and visa_sponsorship
-// (real but noisier/rarer phrasing than work-mode/employment-type vocab — stays AI-only for v1).
+// Excludes company_sizes (LinkedIn post text almost never states headcount) and visa_sponsorship (real but
+// noisier/rarer phrasing than work-mode/employment-type vocab — stays AI-only for v1). ai_instructions
+// itself is still arbitrary free text a regex can't read directly, BUT (2026-08-28 follow-up) once it's
+// been translated into a cached match_keywords_positive/negative list (see ai.service.js's
+// generateMatchKeywords, wired in by scraper.worker.js's ensureMatchKeywords), THAT list is something this
+// algorithm can check, same as any other field — so a role with ONLY ai_instructions set (no structured
+// fields at all) now correctly counts as having algorithmic criteria once generation has succeeded at
+// least once. Before that (or if generation keeps failing), this stays false for such a role, same as
+// before this follow-up.
 function roleHasAlgorithmicCriteria(role) {
   const r = role || {};
   return Boolean(
@@ -37,7 +43,10 @@ function roleHasAlgorithmicCriteria(role) {
     r.salary_min != null ||
     r.salary_max != null ||
     (Array.isArray(r.preferred_locations) && r.preferred_locations.length > 0) ||
-    (Array.isArray(r.exclude_keywords) && r.exclude_keywords.length > 0)
+    (Array.isArray(r.exclude_keywords) && r.exclude_keywords.length > 0) ||
+    (r.ai_instructions && r.ai_instructions.trim() &&
+      ((Array.isArray(r.match_keywords_positive) && r.match_keywords_positive.length > 0) ||
+       (Array.isArray(r.match_keywords_negative) && r.match_keywords_negative.length > 0)))
   );
 }
 
@@ -45,13 +54,19 @@ const BASELINE_SCORE = 50; // "no signal either way" — matches the AI prompt's
 const EXCLUDE_KEYWORD_SCORE = 10; // hard override, short-circuits everything else — mirrors the AI's 0-15 band
 
 // Weights favor high-confidence boolean signals (work mode / employment type = clean, stable regex
-// vocabulary) over the fragile numeric one (salary parsing from noisy scraped text).
+// vocabulary) over the fragile numeric one (salary parsing from noisy scraped text). aiMatchKeyword (2026-
+// 08-28 follow-up) deliberately reuses workMode's own top magnitude, repurposed positive — ai_instructions
+// is the AI prompt's own explicitly highest-priority signal, so outranking workMode's weight is intentional.
+// BASELINE_SCORE + aiMatchKeyword.match lands exactly on the default algo_match_escalate_high threshold (80,
+// see globalSettings.js) — a role with only ai_instructions set and one clean keyword hit is enough, on its
+// own, to skip AI escalation entirely under default settings.
 const WEIGHTS = {
   workMode: { match: 15, conflict: -30 },
   employmentType: { match: 15, conflict: -25 },
   salary: { match: 10, conflict: -20 },
   location: { match: 10 }, // match-only, see classifyLocation
   keywordOverlap: { match: 5 },
+  aiMatchKeyword: { match: 30 },
 };
 
 const WORK_MODE_PATTERNS = {
@@ -179,9 +194,29 @@ function classifyLocation(text, roleLocations) {
   return roleLocations.some((loc) => loc && lower.includes(loc.toLowerCase())) ? "match" : "silent";
 }
 
-function findExcludeKeywordHit(text, excludeKeywords) {
+// Checks the user's own exclude_keywords first, then (2026-08-28 follow-up) AI-derived negative keywords —
+// both are plain substring checks, no negation-awareness, same accepted-limitation convention throughout
+// this file. Returns { term, source: "user" | "ai_instructions" } or null.
+function findExcludeKeywordHit(text, excludeKeywords, aiNegativeKeywords) {
   const lower = text.toLowerCase();
-  return (excludeKeywords || []).find((kw) => kw && lower.includes(kw.toLowerCase().trim())) || null;
+  const userHit = (excludeKeywords || []).find((kw) => kw && lower.includes(kw.toLowerCase().trim()));
+  if (userHit) return { term: userHit, source: "user" };
+  const aiHit = (aiNegativeKeywords || []).find((kw) => kw && lower.includes(kw.toLowerCase().trim()));
+  if (aiHit) return { term: aiHit, source: "ai_instructions" };
+  return null;
+}
+
+// Gated on ai_instructions being CURRENTLY set — a role whose candidate cleared their free-text
+// instructions must not keep scoring against an orphaned cached list. Staleness (instructions EDITED, not
+// cleared) is deliberately NOT checked here — this function is a pure read of role's current columns, and a
+// slightly-stale AI-derived list is still real signal from this candidate's own words for this same role,
+// strictly better than none (same "something beats nothing" precedent as the AI-failure algorithmic
+// fallback in scraper.worker.js). Staleness only ever gates whether to RE-generate (see ai.service.js's
+// matchKeywordsAreStale) — never whether to USE what's already cached.
+function findAiPositiveKeywordHit(text, role) {
+  if (!role.ai_instructions || !role.ai_instructions.trim()) return null;
+  const lower = text.toLowerCase();
+  return (role.match_keywords_positive || []).find((kw) => kw && lower.includes(kw.toLowerCase().trim())) || null;
 }
 
 // The one exported scoring entry point. Returns null when there's nothing algorithmic to check at all
@@ -196,12 +231,16 @@ function computeAlgorithmicMatch(contextText, role) {
     return { score: BASELINE_SCORE, reasoning: "Algorithmic: no post text captured to check.", signals: {} };
   }
 
-  const excludeHit = findExcludeKeywordHit(text, r.exclude_keywords);
+  const aiInstructionsSet = Boolean(r.ai_instructions && r.ai_instructions.trim());
+  const excludeHit = findExcludeKeywordHit(text, r.exclude_keywords, aiInstructionsSet ? r.match_keywords_negative : null);
   if (excludeHit) {
+    const label = excludeHit.source === "ai_instructions"
+      ? `matches an excluded topic from your AI instructions ("${excludeHit.term}")`
+      : `excludes "${excludeHit.term}"`;
     return {
       score: EXCLUDE_KEYWORD_SCORE,
-      reasoning: `Algorithmic: excludes "${excludeHit}" — found in the post text.`,
-      signals: { excludeKeywordHit: excludeHit },
+      reasoning: `Algorithmic: ${label} — found in the post text.`,
+      signals: { excludeKeywordHit: excludeHit.term, excludeKeywordSource: excludeHit.source },
     };
   }
 
@@ -251,15 +290,31 @@ function computeAlgorithmicMatch(contextText, role) {
     score += WEIGHTS.keywordOverlap.match;
   }
 
+  const aiPositiveHit = findAiPositiveKeywordHit(text, r);
+  if (aiPositiveHit) {
+    score += WEIGHTS.aiMatchKeyword.match;
+    signals.aiInstructionsKeyword = "match";
+    parts.push(`AI instructions keyword match ("${aiPositiveHit}")`);
+  }
+
   score = Math.max(0, Math.min(100, Math.round(score)));
   const reasoning = `Algorithmic: ${parts.length > 0 ? parts.join(", ") : "no structured signals detected in post text"} (${score}/100).`;
   return { score, reasoning: reasoning.slice(0, 200), signals };
 }
 
-// Pure escalation policy — no I/O, easy to hand-verify against a truth table.
-function shouldEscalateToAI(algoResult, role, { aiEnabled, remainingCredits, lowThreshold, highThreshold }) {
+// Pure escalation policy — no I/O, easy to hand-verify against a truth table. hasFreshMatchKeywords
+// (2026-08-28 follow-up) is computed by the caller (scraper.worker.js, which already imports both this
+// service and ai.service.js's matchKeywordsAreStale) — kept out of this file to preserve its "pure, no DB,
+// no network" claim even though matchKeywordsAreStale itself happens to also be pure.
+function shouldEscalateToAI(algoResult, role, { aiEnabled, remainingCredits, lowThreshold, highThreshold, hasFreshMatchKeywords }) {
   if (!aiEnabled || !(remainingCredits > 0)) return false;
-  if (role && role.ai_instructions && role.ai_instructions.trim()) return true; // free text: algorithm can never resolve this
+  const hasAiInstructions = Boolean(role && role.ai_instructions && role.ai_instructions.trim());
+  // Free text can't be resolved by regex directly — but once it's been translated into a fresh, non-empty
+  // cached keyword list (see ai.service.js's generateMatchKeywords), THAT list is something
+  // computeAlgorithmicMatch can check, same as any other signal, and this role falls through to the normal
+  // score-band check below instead of always escalating. Bootstrap/failure case (no usable keywords yet)
+  // keeps today's behavior: escalate every post until/unless that changes.
+  if (hasAiInstructions && !hasFreshMatchKeywords) return true;
   if (!algoResult) return true; // nothing algorithmic to go on (e.g. role only has company_sizes set)
   if (algoResult.score <= lowThreshold || algoResult.score >= highThreshold) return false; // confident either way
   return true; // borderline — let AI break the tie

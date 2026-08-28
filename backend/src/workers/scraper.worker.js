@@ -2,13 +2,23 @@ const pc = require("picocolors");
 const axios = require("axios");
 const { supabase } = require("../config/supabase");
 const { extractContactsWithAttribution, extractInitialContacts, extractPaginatedContacts } = require("../services/extraction.service");
-const { scoreJobMatch } = require("../services/ai.service");
+const { scoreJobMatch, generateMatchKeywords, matchKeywordsAreStale } = require("../services/ai.service");
 const { roleHasCriteria, computeAlgorithmicMatch, shouldEscalateToAI } = require("../services/matchAlgorithm.service");
 const { ExecutionLogger } = require("../lib/logger");
 const { getGlobalSettings } = require("../lib/globalSettings");
 const { spendAiCredit } = require("../lib/aiCredits");
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// True when roleDef has real, USABLE (non-stale, non-empty) AI-curated match keywords — the gate that lets
+// shouldEscalateToAI stop forcing a full AI read on every post for an ai_instructions role (2026-08-28
+// follow-up). Lives here, not matchAlgorithm.service.js, so that file can stay dependency-free (it imports
+// nothing from ai.service.js) even though matchKeywordsAreStale itself happens to be pure.
+function hasFreshMatchKeywords(roleDef) {
+  if (!roleDef.ai_instructions || !roleDef.ai_instructions.trim()) return false;
+  if (matchKeywordsAreStale(roleDef)) return false;
+  return (roleDef.match_keywords_positive || []).length > 0 || (roleDef.match_keywords_negative || []).length > 0;
+}
 
 // `mappings` (a flat [{keyword, role, roleDef}, ...] list, one entry per keyword/alias across all of the
 // user's roles) is resolved by processJob() before this is called — see automailsend_role_defs.keywords.
@@ -37,6 +47,55 @@ async function processJobLogic(job, logger, mappings, aiEnabled, aiCredits, aiTe
   // maxPages/delayMs. saveContacts (defined below) also needs it now, for the algorithmic-match escalation
   // thresholds. getGlobalSettings() is 60s-cached, so calling it once up front costs nothing extra.
   const globalSettings = await getGlobalSettings();
+
+  // AI-curated match keywords (2026-08-28 follow-up) — generates once per role, not once per post, so an
+  // ai_instructions role stops costing a full AI read on every single scraped post. Capped at one attempt
+  // per role PER RUN (role.id -> failed) — a role whose generation fails (AI error, or credits ran out)
+  // gets retried fresh on the next run, not spammed across every keyword/page for that same role in this
+  // one. Declared at this scope (not inside saveContacts) since saveContacts is called multiple times per
+  // run (once per keyword's initial + each paginated page) and this cap needs to span all of them.
+  const matchKeywordsAttemptFailed = new Set();
+  const ensureMatchKeywords = async (roleDef) => {
+    if (!roleDef.ai_instructions || !roleDef.ai_instructions.trim()) return; // nothing to translate
+    if (!matchKeywordsAreStale(roleDef)) return; // already fresh — this run or a prior one
+    if (matchKeywordsAttemptFailed.has(roleDef.id)) return;
+    if (!aiEnabled || !(remainingCredits > 0)) return; // same gates as the full-post escalation path
+
+    try {
+      const generated = await generateMatchKeywords(roleDef, aiTemperature);
+      const spent = await spendAiCredit(supabase, user_id);
+      remainingCredits = spent ? remainingCredits - 1 : 0;
+      if (!generated) {
+        matchKeywordsAttemptFailed.add(roleDef.id);
+        return;
+      }
+      const fields = {
+        match_keywords_positive: generated.positive,
+        match_keywords_negative: generated.negative,
+        match_keywords_source_snapshot: generated.promptSnapshot,
+        match_keywords_generated_at: new Date().toISOString(),
+      };
+      await supabase.from("automailsend_role_defs").update(fields).eq("id", roleDef.id);
+      // Mutate the SHARED roleDef object in place (mappings' entries all reference the same object per
+      // role, never cloned — see processJob) so every later keyword/group for this role in this run sees
+      // the fresh keywords immediately, no extra cache map needed.
+      Object.assign(roleDef, fields);
+      if (generated.positive.length === 0 && generated.negative.length === 0) {
+        await logger.append(
+          "INFO",
+          `AI instructions for role '${roleDef.key}' couldn't be reduced to literal keywords — will keep using full AI reads per post for this role (cached, won't re-attempt until the instructions change).`
+        );
+      } else {
+        await logger.append(
+          "INFO",
+          `Generated AI match keywords for role '${roleDef.key}': ${generated.positive.length} positive, ${generated.negative.length} negative (1 AI credit, cached for future scrapes).`
+        );
+      }
+    } catch (err) {
+      matchKeywordsAttemptFailed.add(roleDef.id);
+      await logger.append("WARN", `Failed to generate AI match keywords for role '${roleDef.key}': ${err.message} — full AI reads continue for now, will retry next run.`);
+    }
+  };
 
   let headers;
   try {
@@ -169,12 +228,14 @@ async function processJobLogic(job, logger, mappings, aiEnabled, aiCredits, aiTe
       };
 
       if (jobPost && jobPost.needsScoring && roleHasCriteria(roleDef)) {
+        await ensureMatchKeywords(roleDef);
         const algoResult = computeAlgorithmicMatch(group.contextText, roleDef);
         const escalate = shouldEscalateToAI(algoResult, roleDef, {
           aiEnabled,
           remainingCredits,
           lowThreshold: globalSettings.algo_match_escalate_low ?? 20,
           highThreshold: globalSettings.algo_match_escalate_high ?? 80,
+          hasFreshMatchKeywords: hasFreshMatchKeywords(roleDef),
         });
 
         if (escalate) {

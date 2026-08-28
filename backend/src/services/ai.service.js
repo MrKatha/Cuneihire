@@ -341,10 +341,105 @@ ${criteria || "None set."}`;
   return { score, reasoning };
 }
 
+// AI-curated match keywords (2026-08-28 follow-up, Phase 2 task 1 addendum) — translates a role's free-text
+// ai_instructions into a bounded, literal keyword/phrase list a cheap substring check can use against
+// future scraped post text, instead of scoreJobMatch reading the full post on every single one. Deliberately
+// post-independent — NO post text is ever given to this call, only the role's own criteria — that's what
+// makes it safe to run once per role instead of once per post. See matchAlgorithm.service.js's
+// computeAlgorithmicMatch and scraper.worker.js's ensureMatchKeywords.
+const MATCH_KEYWORDS_SYSTEM_PROMPT = `You translate a candidate's job-search criteria into two short, literal keyword/phrase lists a downstream substring-matching program (not another AI) will check against future scraped LinkedIn job posts. Your only output is a single JSON object — no markdown, no commentary.
+
+You will be given:
+- AI INSTRUCTIONS — free-text instructions written by the candidate themselves, e.g. "only low-code roles, I use N8N and Claude Code" or "exclude unpaid internships even if the keywords otherwise match." This is the only thing to translate.
+- EXCLUDE KEYWORDS/TOPICS (optional) — topics the candidate already excludes by exact keyword; for context only, so you don't waste output repeating them. A separate, exact-match check already covers these — do not put them in your own output.
+- CANDIDATE'S CRITERIA (optional) — structured fields (work mode, salary, etc.) already checked separately by exact rules; for context only, do not restate these as keywords either.
+
+Your job is ONLY to expand AI INSTRUCTIONS into two literal keyword/phrase lists a plain substring search can use against a job post's raw text:
+- POSITIVE: words/short phrases whose presence in a post is real, concrete evidence the post satisfies AI INSTRUCTIONS. Include close synonyms, common alternate spellings/casing a recruiter might actually type, and named tools/technologies/frameworks explicitly implied (e.g. "low-code" implies "n8n", "zapier", "make.com", "airtable", "no-code", "workflow automation").
+- NEGATIVE: words/short phrases whose presence is real, concrete evidence the post CONTRADICTS or is clearly excluded by AI INSTRUCTIONS. Only include a phrase when its presence alone would be strong, near-certain evidence of a non-match — not just "the opposite" of a POSITIVE entry. When AI INSTRUCTIONS doesn't clearly rule anything out, return an empty NEGATIVE list rather than inventing one.
+
+Hard rules:
+- Every phrase must be something that could literally appear, near-verbatim, in a real job post's text — never an abstract judgment, a sentiment, or anything requiring the reasoning a human (or another AI) would need to apply. If AI INSTRUCTIONS can't be reduced to any such literal phrase at all, return both lists empty — do not force a weak guess.
+- Lowercase, no surrounding punctuation, no regex syntax — plain words/phrases only, 1-4 words each.
+- At most 15 phrases in POSITIVE, at most 10 in NEGATIVE. Prioritize the highest-confidence, most-specific phrases over broad/generic ones (prefer "n8n" and "zapier" over just "automation").
+- Never include a phrase so short or common it would false-positive on unrelated posts (e.g. never "ai", "app", "team", "remote" alone) unless AI INSTRUCTIONS is specifically about that exact word.
+
+Output ONLY this JSON shape: {"positive": ["<phrase>", ...], "negative": ["<phrase>", ...]}`;
+
+// The user-prompt string doubles as the staleness fingerprint (see matchKeywordsAreStale below) — it's a
+// deterministic function of exactly the inputs that drive generation, so comparing it directly is enough to
+// detect "this role's criteria changed since we generated," with no hashing library (this codebase adds
+// none). Returns null when there's nothing to translate — same "nothing to say" convention as
+// buildRoleCriteriaBlock — which is the ai_instructions-only gate for this whole feature: exclude_keywords/
+// structured fields are already exact-matched elsewhere, no AI needed to "curate" those.
+function buildMatchKeywordsPrompt(role) {
+  const aiInstructions = buildAiInstructionsBlock(role);
+  if (!aiInstructions) return null;
+  const excludeKeywords = buildExcludeKeywordsBlock(role);
+  const criteria = buildRoleCriteriaBlock(role);
+  return `AI INSTRUCTIONS (from the candidate, the only thing to translate):
+${aiInstructions}
+${excludeKeywords ? `
+EXCLUDE KEYWORDS/TOPICS (context only, already exact-matched separately):
+${excludeKeywords}` : ""}
+
+CANDIDATE'S CRITERIA (context only, already checked separately):
+${criteria || "None set."}`;
+}
+
+// True when the role's ai_instructions/exclude_keywords/criteria have changed since match_keywords_* was
+// last generated (or nothing has been generated yet). False (never stale) when there's nothing to translate
+// at all — matches buildMatchKeywordsPrompt's null case.
+function matchKeywordsAreStale(role) {
+  const prompt = buildMatchKeywordsPrompt(role);
+  if (!prompt) return false;
+  return prompt !== (role.match_keywords_source_snapshot || null);
+}
+
+const MAX_POSITIVE_MATCH_KEYWORDS = 15;
+// Negative capped tighter than positive — a wrong negative silently drops a real lead via
+// matchAlgorithm.service.js's hard-override exclude path, a costlier mistake than a missed positive bonus,
+// so keep this list tighter/higher-confidence.
+const MAX_NEGATIVE_MATCH_KEYWORDS = 10;
+const MAX_MATCH_KEYWORD_LEN = 40; // chars per phrase — same "bound anything AI hands back" instinct as
+                                   // this file's reasoning.slice(0, 200) above.
+
+function sanitizeMatchKeywordList(list, maxItems) {
+  if (!Array.isArray(list)) return [];
+  const seen = new Set();
+  const out = [];
+  for (const raw of list) {
+    if (typeof raw !== "string") continue;
+    const phrase = raw.trim().toLowerCase().slice(0, MAX_MATCH_KEYWORD_LEN);
+    if (!phrase || seen.has(phrase)) continue;
+    seen.add(phrase);
+    out.push(phrase);
+    if (out.length >= maxItems) break;
+  }
+  return out;
+}
+
+// Returns { positive, negative, promptSnapshot } or null when there's nothing to translate (no
+// ai_instructions set) or the AI response didn't come back in the expected shape. promptSnapshot is the
+// exact string to persist as match_keywords_source_snapshot — callers should not rebuild it separately.
+async function generateMatchKeywords(role, temperature) {
+  const prompt = buildMatchKeywordsPrompt(role);
+  if (!prompt) return null;
+  const result = await callAiJson(MATCH_KEYWORDS_SYSTEM_PROMPT, prompt, temperature);
+  if (!result || typeof result !== "object") return null;
+  return {
+    positive: sanitizeMatchKeywordList(result.positive, MAX_POSITIVE_MATCH_KEYWORDS),
+    negative: sanitizeMatchKeywordList(result.negative, MAX_NEGATIVE_MATCH_KEYWORDS),
+    promptSnapshot: prompt,
+  };
+}
+
 module.exports = {
   generateAiPersonalizedEmail,
   chooseTemplateForJob,
   applyPlaceholders,
   hasUnresolvedPlaceholders,
   scoreJobMatch,
+  generateMatchKeywords,
+  matchKeywordsAreStale,
 };

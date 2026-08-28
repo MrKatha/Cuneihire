@@ -815,3 +815,13 @@ alter table public.automailsend_job_posts
 
 alter table public.automailsend_recipients
   add column if not exists match_source text;
+
+-- Phase 2 task 1 addendum (2026-08-28) — AI-curated match keywords, generated ONCE per role from
+-- ai_instructions (translated by ai.service.js's generateMatchKeywords) instead of reading the full post
+-- on every single scraped post. All default to "nothing generated yet" so every existing role behaves
+-- exactly as before until its ai_instructions actually gets translated.
+alter table public.automailsend_role_defs
+  add column if not exists match_keywords_positive text[] default '{}',
+  add column if not exists match_keywords_negative text[] default '{}',
+  add column if not exists match_keywords_source_snapshot text,
+  add column if not exists match_keywords_generated_at timestamptz;
