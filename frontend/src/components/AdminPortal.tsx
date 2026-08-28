@@ -4,6 +4,7 @@ import { supabase } from "@/lib/supabase";
 
 type UserState = {
   user_id: string;
+  email: string;
   is_blocked: boolean;
   allowed_products: string[];
   config: any;
@@ -30,11 +31,27 @@ type GlobalSettings = {
   max_daily_send_limit: number;
 };
 
+type OverviewData = {
+  totalUsers: number;
+  candidateCount: number;
+  recruiterCount: number;
+  activeCount: number;
+  blockedCount: number;
+  signupsLast7d: number;
+  totalLeads: number;
+  totalEmailsSent: number;
+  totalReplies: number;
+  totalAiCreditsRemaining: number;
+  recentFailures24h: number;
+  workerHealth: { jobType: string; lastRunAt: string | null; lastStatus: string | null }[];
+};
+
 export function AdminPortal() {
   const [globalSettings, setGlobalSettings] = useState<GlobalSettings | null>(null);
   const [users, setUsers] = useState<UserState[]>([]);
+  const [overview, setOverview] = useState<OverviewData | null>(null);
   const [loading, setLoading] = useState(true);
-  
+
   // Settings Form State
   const [minInterval, setMinInterval] = useState(5);
   const [minDelay, setMinDelay] = useState(5);
@@ -46,7 +63,7 @@ export function AdminPortal() {
   const [maxDailySendLimit, setMaxDailySendLimit] = useState(100);
   
   // Navigation State
-  const [activeTopTab, setActiveTopTab] = useState<"global" | "users">("users");
+  const [activeTopTab, setActiveTopTab] = useState<"overview" | "global" | "users">("overview");
   const [viewUser, setViewUser] = useState<UserState | null>(null);
 
   useEffect(() => {
@@ -58,14 +75,16 @@ export function AdminPortal() {
     try {
       const { data: { session } } = await supabase.auth.getSession();
       const headers: Record<string, string> = session ? { "Authorization": `Bearer ${session.access_token}` } : {};
-      const [settingsRes, usersRes] = await Promise.all([
+      const [settingsRes, usersRes, overviewRes] = await Promise.all([
         fetch("/api/admin/global-settings", { headers }),
-        fetch("/api/admin/users", { headers })
+        fetch("/api/admin/users", { headers }),
+        fetch("/api/admin/overview", { headers })
       ]);
-      
+
       const settingsData = await settingsRes.json();
       const usersData = await usersRes.json();
-      
+      const overviewData = await overviewRes.json();
+
       if (settingsData.success) {
         setGlobalSettings(settingsData.data);
         setMinInterval(settingsData.data.min_fetch_interval || 5);
@@ -74,9 +93,13 @@ export function AdminPortal() {
         setAllowSignups(settingsData.data.allow_signups !== false);
         setMaxDailySendLimit(settingsData.data.max_daily_send_limit || 100);
       }
-      
+
       if (usersData.success) {
         setUsers(usersData.data);
+      }
+
+      if (overviewData.success) {
+        setOverview(overviewData.data);
       }
     } catch (err) {
       toast.error("Failed to fetch admin data");
@@ -147,19 +170,73 @@ export function AdminPortal() {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
       <div className="tabs" style={{ display: "flex", gap: "1rem", borderBottom: "1px solid var(--line)", paddingBottom: "0.5rem" }}>
-        <button 
-          className={`btn ${activeTopTab === "users" ? "primary" : "ghost"}`} 
+        <button
+          className={`btn ${activeTopTab === "overview" ? "primary" : "ghost"}`}
+          onClick={() => setActiveTopTab("overview")}
+        >
+          Overview
+        </button>
+        <button
+          className={`btn ${activeTopTab === "users" ? "primary" : "ghost"}`}
           onClick={() => setActiveTopTab("users")}
         >
           User Management
         </button>
-        <button 
-          className={`btn ${activeTopTab === "global" ? "primary" : "ghost"}`} 
+        <button
+          className={`btn ${activeTopTab === "global" ? "primary" : "ghost"}`}
           onClick={() => setActiveTopTab("global")}
         >
           Global Settings
         </button>
       </div>
+
+      {activeTopTab === "overview" && (
+        <section className="panel">
+          <h2 className="panel-title">Overall Status</h2>
+          <p className="hint">A live snapshot across every user — not a historical trend (no usage ledger exists yet).</p>
+
+          {!overview ? (
+            <p className="hint compact" style={{ marginTop: "1rem" }}>Loading overview…</p>
+          ) : (
+            <>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: "0.75rem", marginTop: "1rem" }}>
+                <StatTile
+                  label="Total Users"
+                  value={overview.totalUsers}
+                  sub={`${overview.candidateCount} candidates, ${overview.recruiterCount} recruiters`}
+                />
+                <StatTile
+                  label="Active vs Blocked"
+                  value={overview.activeCount}
+                  sub={`${overview.blockedCount} blocked`}
+                />
+                <StatTile label="Signups (7d)" value={overview.signupsLast7d} />
+                <StatTile label="Total Leads" value={overview.totalLeads} />
+                <StatTile label="Emails Sent" value={overview.totalEmailsSent} />
+                <StatTile label="Replies" value={overview.totalReplies} />
+                <StatTile label="AI Credits Remaining" value={overview.totalAiCreditsRemaining} sub="platform-wide" />
+              </div>
+
+              <div className="panel" style={{ marginTop: "1rem", background: "var(--bg-panel)" }}>
+                <h3 style={{ margin: "0 0 0.75rem", fontSize: "1rem" }}>Worker Health</h3>
+                {overview.recentFailures24h > 0 && (
+                  <p style={{ margin: "0 0 0.75rem" }}>
+                    <span className="badge warn">{overview.recentFailures24h} failure{overview.recentFailures24h === 1 ? "" : "s"} in the last 24h</span>
+                  </p>
+                )}
+                <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem" }}>
+                  {overview.workerHealth.map((w) => (
+                    <p key={w.jobType} className="hint compact" style={{ margin: 0, textTransform: "capitalize" }}>
+                      <strong>{w.jobType.replace("_", " ")}:</strong>{" "}
+                      {w.lastRunAt ? `last ran ${new Date(w.lastRunAt).toLocaleString()} (${w.lastStatus})` : "never run"}
+                    </p>
+                  ))}
+                </div>
+              </div>
+            </>
+          )}
+        </section>
+      )}
 
       {activeTopTab === "global" && (
         <section className="panel">
@@ -227,6 +304,7 @@ export function AdminPortal() {
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.9rem" }}>
               <thead>
                 <tr style={{ borderBottom: "1px solid var(--line)", textAlign: "left" }}>
+                  <th style={{ padding: "0.75rem 0.5rem" }}>Email</th>
                   <th style={{ padding: "0.75rem 0.5rem" }}>User ID</th>
                   <th style={{ padding: "0.75rem 0.5rem" }}>Joined</th>
                   <th style={{ padding: "0.75rem 0.5rem" }}>Status</th>
@@ -240,7 +318,8 @@ export function AdminPortal() {
               <tbody>
                 {users.map(u => (
                   <tr key={u.user_id} style={{ borderBottom: "1px solid var(--line)" }}>
-                    <td style={{ padding: "0.75rem 0.5rem", fontFamily: "monospace" }}>{u.user_id}</td>
+                    <td style={{ padding: "0.75rem 0.5rem" }}>{u.email || <span className="hint compact">—</span>}</td>
+                    <td style={{ padding: "0.75rem 0.5rem", fontFamily: "monospace", fontSize: "0.8rem" }}>{u.user_id}</td>
                     <td style={{ padding: "0.75rem 0.5rem" }}>{new Date(u.created_at).toLocaleDateString()}</td>
                     <td style={{ padding: "0.75rem 0.5rem" }}>
                       {u.is_blocked ? (
@@ -312,6 +391,18 @@ export function AdminPortal() {
       {viewUser && (
         <UserDetailsModal user={viewUser} onClose={() => setViewUser(null)} />
       )}
+    </div>
+  );
+}
+
+// Copied from JamsOverviewTab.tsx's StatTile (2026-08-29) — this codebase doesn't share small display
+// components cross-file elsewhere either, so a copy here is consistent with precedent, not an anti-pattern.
+function StatTile({ label, value, sub }: { label: string; value: React.ReactNode; sub?: string }) {
+  return (
+    <div style={{ border: "1px solid var(--line)", borderRadius: "12px", padding: "0.9rem 1rem", minWidth: 0 }}>
+      <div className="hint compact" style={{ margin: "0 0 0.3rem" }}>{label}</div>
+      <div style={{ fontSize: "1.4rem", fontWeight: 650, lineHeight: 1.1 }}>{value}</div>
+      {sub && <div className="hint compact" style={{ margin: "0.25rem 0 0" }}>{sub}</div>}
     </div>
   );
 }
@@ -499,7 +590,7 @@ function UserDetailsModal({ user, onClose }: { user: UserState; onClose: () => v
       >
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingBottom: "1rem", borderBottom: "1px solid var(--line)" }}>
           <div>
-            <h2 className="panel-title">User Details Dashboard</h2>
+            <h2 className="panel-title">{user.email || "User Details Dashboard"}</h2>
             <p className="hint compact" style={{ fontFamily: "monospace", marginTop: "0.25rem" }}>{user.user_id}</p>
           </div>
           <button className="btn ghost icon" onClick={onClose}>✕</button>
@@ -530,6 +621,8 @@ function UserDetailsModal({ user, onClose }: { user: UserState; onClose: () => v
               {activeTab === "overview" && (
                 <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
                   <div className="panel" style={{ background: "var(--bg-panel)" }}>
+                    <p><strong>Email:</strong> {user.email || "—"}</p>
+                    <p><strong>Type:</strong> {user.ats_ai_credits !== null ? "Recruiter" : "Candidate"}</p>
                     <p><strong>Status:</strong> {user.is_blocked ? "Blocked" : "Active"}</p>
                     <p><strong>Joined:</strong> {new Date(user.created_at).toLocaleString()}</p>
                     <p><strong>Total Scraped/Added Leads:</strong> {details.recipients.length}</p>
@@ -647,23 +740,31 @@ function UserDetailsModal({ user, onClose }: { user: UserState; onClose: () => v
                         <thead>
                           <tr style={{ borderBottom: "1px solid var(--line)", textAlign: "left" }}>
                             <th style={{ padding: "0.5rem" }}>Time</th>
-                            <th style={{ padding: "0.5rem" }}>Action</th>
-                            <th style={{ padding: "0.5rem" }}>Result</th>
+                            <th style={{ padding: "0.5rem" }}>Job</th>
+                            <th style={{ padding: "0.5rem" }}>Status</th>
+                            <th style={{ padding: "0.5rem" }}>Message</th>
                           </tr>
                         </thead>
                         <tbody>
+                          {/* Fixed 2026-08-29 — this used to read log.action_type/log.result, which don't
+                              exist on automailsend_execution_logs (real columns: status/message/details,
+                              jobType lives inside details) and always rendered blank. */}
                           {details.execution_logs.map((log: any) => (
                             <tr key={log.id} style={{ borderBottom: "1px solid var(--line)" }}>
                               <td style={{ padding: "0.5rem", color: "var(--muted)", whiteSpace: "nowrap" }}>{new Date(log.created_at).toLocaleString()}</td>
+                              <td style={{ padding: "0.5rem", textTransform: "capitalize" }}>{log.details?.jobType || "—"}</td>
                               <td style={{ padding: "0.5rem" }}>
-                                <span className={`badge ${log.action_type === 'autofetch' ? 'ok' : 'ghost'}`}>
-                                  {log.action_type}
+                                <span className={`badge ${log.status === 'success' ? 'ok' : log.status === 'error' || log.status === 'failed' ? 'warn' : 'ghost'}`}>
+                                  {log.status}
                                 </span>
                               </td>
                               <td style={{ padding: "0.5rem" }}>
-                                <pre style={{ margin: 0, fontSize: "0.75rem", whiteSpace: "pre-wrap", background: "none" }}>
-                                  {JSON.stringify(log.result, null, 2)}
-                                </pre>
+                                <p style={{ margin: "0 0 0.25rem" }}>{log.message}</p>
+                                {log.details && Object.keys(log.details).length > 0 && (
+                                  <pre style={{ margin: 0, fontSize: "0.7rem", whiteSpace: "pre-wrap", background: "none", color: "var(--muted)" }}>
+                                    {JSON.stringify(log.details, null, 2)}
+                                  </pre>
+                                )}
                               </td>
                             </tr>
                           ))}

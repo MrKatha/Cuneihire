@@ -1,45 +1,54 @@
 import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
-
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
-const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
-const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey);
-
-async function verifyAdmin(req: Request) {
-  const authHeader = req.headers.get("Authorization");
-  if (!authHeader) return false;
-  const token = authHeader.replace("Bearer ", "");
-  
-  const { data: { user }, error } = await supabaseAdmin.auth.getUser(token);
-  if (error || !user) return false;
-
-  const adminEmails = (process.env.NEXT_PUBLIC_ADMIN_EMAILS || "").split(",");
-  return adminEmails.includes(user.email || "");
-}
+import { supabaseAdmin, verifyAdmin } from "@/lib/adminAuth";
 
 export async function GET(req: Request) {
   if (!(await verifyAdmin(req))) return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
 
   try {
-    const { data, error } = await supabaseAdmin
-      .from("automailsend_app_state")
-      .select("*")
-      .order("created_at", { ascending: false });
+    // auth.users (not automailsend_app_state) is the primary source (2026-08-29 fix) — a user who signed
+    // up but never opened the app has no app_state row yet, and was previously invisible to this list
+    // entirely. listUsers() is a service-role-gated GoTrue Admin API call, no RLS involved.
+    const { data: authData, error: authError } = await supabaseAdmin.auth.admin.listUsers();
+    if (authError) throw authError;
 
-    if (error) throw error;
+    const { data: appStates, error: appStateError } = await supabaseAdmin
+      .from("automailsend_app_state")
+      .select("*");
+    if (appStateError) throw appStateError;
+    const appStateByUser = new Map((appStates || []).map((s) => [s.user_id, s]));
 
     // Recruiter portal (2026-08-19) — a separate table (recruiter is a capability, not a column on
     // app_state); merge in ats_ai_credits for any user who's activated it, null for everyone else so the
-    // UI can tell "not a recruiter" from "recruiter with 0 credits".
+    // UI can tell "not a recruiter" from "recruiter with 0 credits". Also doubles as the recruiter/
+    // candidate signal — user_metadata.account_type isn't reliable (every live signup path hardcodes
+    // "candidate" since the signup toggle was removed 2026-08-25).
     const { data: recruiterProfiles } = await supabaseAdmin
       .from("automailsend_recruiter_profiles")
       .select("user_id, ats_ai_credits");
     const atsCreditsByUser = new Map((recruiterProfiles || []).map((r) => [r.user_id, r.ats_ai_credits]));
 
-    const merged = (data || []).map((u) => ({
-      ...u,
-      ats_ai_credits: atsCreditsByUser.has(u.user_id) ? atsCreditsByUser.get(u.user_id) : null,
-    }));
+    const merged = (authData.users || [])
+      .map((u) => {
+        const state = appStateByUser.get(u.id) || {};
+        return {
+          is_blocked: false,
+          allowed_products: [],
+          config: null,
+          auto_fetch: null,
+          automail: null,
+          ai_credits: 0,
+          max_keywords: null,
+          min_fetch_interval_override: null,
+          ...state,
+          user_id: u.id,
+          email: u.email || "",
+          // Real signup timestamp, not whenever app_state was first upserted (can be days later — that
+          // was already silently wrong for anyone who signed up but didn't immediately touch settings).
+          created_at: u.created_at,
+          ats_ai_credits: atsCreditsByUser.has(u.id) ? atsCreditsByUser.get(u.id) : null,
+        };
+      })
+      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 
     return NextResponse.json({ success: true, data: merged });
   } catch (error: any) {
@@ -67,10 +76,13 @@ export async function POST(req: Request) {
 
     let data: any = null;
     if (Object.keys(updateData).length > 0) {
+      // upsert, not update (2026-08-29) — GET now surfaces every signed-up user via auth.users, including
+      // ones with no automailsend_app_state row yet (never opened the app). A plain .update() on a
+      // nonexistent row affects 0 rows and .single() then throws "no rows returned" — upsert makes
+      // blocking/crediting a brand-new user work the first time an admin touches them.
       const res = await supabaseAdmin
         .from("automailsend_app_state")
-        .update(updateData)
-        .eq("user_id", user_id)
+        .upsert({ user_id, ...updateData }, { onConflict: "user_id" })
         .select()
         .single();
       if (res.error) throw res.error;
