@@ -16,26 +16,21 @@ jobs:
     steps:
       - name: Deploy to Server via SSH
         uses: appleboy/ssh-action@v1.0.3
-        env:
-          ROOT_PASS: ${{ secrets.SERVER_ROOT_PASSWORD }}
         with:
           host: ${{ secrets.SERVER_IP }}
           username: ${{ secrets.SERVER_USER }}
           port: ${{ secrets.SERVER_PORT }}
           key: ${{ secrets.SERVER_PRIVATE_KEY }}
-          envs: ROOT_PASS
           script: |
-            printf "%s\n" "$ROOT_PASS" | sudo -S -p "" bash -c '
-              echo "Moving to project directory..."
-              cd /srv/ismail_data/auto_apply_linkedin
-              
-              echo "Pulling latest changes..."
-              git pull origin master
-              
-              echo "Installing backend dependencies..."
-              cd backend
-              npm i
-              
-              echo "Restarting PM2 process..."
-              pm2 restart auto_apply_linkedin_backend
-            '
+            echo "Moving to project directory..."
+            cd /srv/ismail_data/auto_apply_linkedin
+
+            echo "Pulling latest changes..."
+            git pull origin master
+
+            echo "Installing backend dependencies..."
+            cd backend
+            npm i
+
+            echo "Restarting PM2 process..."
+            pm2 restart auto_apply_linkedin_backend --update-env
