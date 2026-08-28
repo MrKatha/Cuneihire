@@ -35,7 +35,9 @@ function roleHasCriteria(role) {
 // Platform-managed AI (2026-08-18): `aiEnabled`/`aiCredits` (from automailsend_app_state) drive JAMS match
 // scoring — scoring is skipped entirely, and the scrape proceeds exactly as before, when AI personalization
 // isn't enabled or credits are exhausted. `aiTemperature` (the AI tab) feeds scoreJobMatch's Gemini call.
-async function processJobLogic(job, logger, mappings, aiEnabled, aiCredits, aiTemperature) {
+// `matchStrictness` (also the AI tab, same automailsend_app_state.ai_match_strictness automail.worker.js
+// already reads) now also gates HERE, not just at send time — see saveContacts below (2026-08-28).
+async function processJobLogic(job, logger, mappings, aiEnabled, aiCredits, aiTemperature, matchStrictness) {
   const {
     user_id,
     auto_fetch_raw_headers,
@@ -109,7 +111,7 @@ async function processJobLogic(job, logger, mappings, aiEnabled, aiCredits, aiTe
         { user_id, source_url: sourceUrl, context_text: contextText || null, ...(authorName ? { author_name: authorName } : {}) },
         { onConflict: "user_id,source_url" }
       )
-      .select("id, match_analyzed_at")
+      .select("id, match_analyzed_at, match_score, match_reasoning")
       .single();
     if (error) {
       await logger.append("WARN", `Failed to upsert job post (${sourceUrl.slice(0, 60)}...): ${error.message}`);
@@ -118,8 +120,15 @@ async function processJobLogic(job, logger, mappings, aiEnabled, aiCredits, aiTe
     }
     // needsScoring stays true across this whole run until a scoring attempt actually succeeds (see
     // saveContacts below) — a transient AI failure should be retried on the *next* scrape run, not
-    // permanently marked "analyzed" with no score.
-    const entry = { id: data.id, needsScoring: !data.match_analyzed_at };
+    // permanently marked "analyzed" with no score. matchScore/matchReasoning carry forward an
+    // already-scored post's result (from this run or a prior one) so a later-arriving new contact on
+    // the same post can still be gated without re-spending a credit to re-score it.
+    const entry = {
+      id: data.id,
+      needsScoring: !data.match_analyzed_at,
+      matchScore: data.match_score ?? null,
+      matchReasoning: data.match_reasoning ?? null,
+    };
     jobPostIdCache.set(sourceUrl, entry);
     return entry;
   };
@@ -131,22 +140,28 @@ async function processJobLogic(job, logger, mappings, aiEnabled, aiCredits, aiTe
   // `roleDef` is the full role row (not just the key) — needed to score this post against its rules.
   const saveContacts = async (groups, roleToAssign, keyword, roleDef) => {
     for (const group of groups) {
-      const newEmails = group.emails.filter(e => !allEmails.has(e.toLowerCase()));
-      const newPhones = group.phones.filter(p => !allPhones.has(p));
-      if (newEmails.length === 0 && newPhones.length === 0) continue;
-
-      const newContactsToInsert = [];
-      const maxLength = Math.max(newEmails.length, newPhones.length);
-      for (let i = 0; i < maxLength; i++) {
-        newContactsToInsert.push({ email: newEmails[i] || null, phone: newPhones[i] || null });
-      }
-
+      // Resolve + score the job post FIRST, before the new-contact dedup check below — NOT after it
+      // (2026-08-28 root cause fix). Previously this whole block sat after an early `continue` for
+      // "no new emails/phones in this group," which meant a post whose contacts had already been
+      // captured on an earlier run (e.g. before AI matching worked, or before this role had any
+      // criteria set) could never be revisited for scoring again: every future run would rediscover
+      // the same already-known contacts, hit that early continue, and skip this block entirely. That's
+      // why the vast majority of scraped posts stayed "Not analyzed" forever even once AI was working —
+      // confirmed live: 28 job posts, only 3 had ever been scored. Scoring now always runs (subject to
+      // the same aiEnabled/credits/roleHasCriteria gates as before) regardless of whether this specific
+      // pass has anything new to insert.
       const jobPost = await getJobPost(group.source_url, group.contextText, group.authorName);
       const jobPostId = jobPost ? jobPost.id : null;
+      let matchScore = jobPost ? jobPost.matchScore : null;
+      let matchReasoning = jobPost ? jobPost.matchReasoning : null;
 
       // JAMS match scoring — once per newly-seen post, only when AI is configured and the role
       // actually has criteria worth checking (see docs/memory.md's "Job matching" section).
-      let matchFields = {};
+      // Seeded from a prior run's score when there is one, so a contact that only shows up on a
+      // post scored earlier still gets that score denormalized onto its own recipient row below
+      // (otherwise it would insert with match_score null and display "Not analyzed" despite the
+      // post itself having already been judged and having gated this very insert above).
+      let matchFields = matchScore != null ? { match_score: matchScore, match_reasoning: matchReasoning } : {};
       if (jobPost && jobPost.needsScoring && aiEnabled && remainingCredits > 0 && roleHasCriteria(roleDef)) {
         try {
           const match = await scoreJobMatch(group.contextText, group.source_url, roleDef, aiTemperature);
@@ -160,6 +175,8 @@ async function processJobLogic(job, logger, mappings, aiEnabled, aiCredits, aiTe
             };
             await supabase.from("automailsend_job_posts").update(matchFields).eq("id", jobPostId);
             jobPost.needsScoring = false;
+            matchScore = match.score;
+            matchReasoning = match.reasoning;
             await logger.append("INFO", `Scored job post ${match.score}/100 against role '${roleToAssign}': ${match.reasoning}`);
           }
         } catch (err) {
@@ -168,6 +185,30 @@ async function processJobLogic(job, logger, mappings, aiEnabled, aiCredits, aiTe
       } else if (jobPost && jobPost.needsScoring && aiEnabled && !aiCreditsExhaustedLogged) {
         await logger.append("WARN", `Out of AI credits — job posts won't be scored for the rest of this run.`);
         aiCreditsExhaustedLogged = true;
+      }
+
+      const newEmails = group.emails.filter(e => !allEmails.has(e.toLowerCase()));
+      const newPhones = group.phones.filter(p => !allPhones.has(p));
+      if (newEmails.length === 0 && newPhones.length === 0) continue;
+
+      // Enforce the match, don't just record it (2026-08-28, operator ask — "if the job does not match
+      // the description I mentioned, do not get that job at all"). Reuses the same ai_match_strictness
+      // threshold automail.worker.js already gates sends on, just moved earlier: a post scored below it
+      // never becomes a recipient in the first place, instead of sailing through as "pending" and only
+      // maybe getting caught at send time. Same "unscored is never a fail" convention as everywhere else
+      // in this codebase (no score yet, or strictness left at 0/off, means nothing is rejected here).
+      if (matchScore != null && matchStrictness > 0 && matchScore < matchStrictness) {
+        await logger.append(
+          "INFO",
+          `Not saving ${newEmails.length + newPhones.length} contact(s) — job post scored ${matchScore}/100 for role '${roleToAssign}' (below your ${matchStrictness} threshold): ${matchReasoning || "no reasoning given"}`
+        );
+        continue;
+      }
+
+      const newContactsToInsert = [];
+      const maxLength = Math.max(newEmails.length, newPhones.length);
+      for (let i = 0; i < maxLength; i++) {
+        newContactsToInsert.push({ email: newEmails[i] || null, phone: newPhones[i] || null });
       }
 
       await logger.append("INFO", `Inserting ${newContactsToInsert.length} new record(s) into Supabase for role '${roleToAssign}'...`);
@@ -421,7 +462,7 @@ async function processJob(job) {
 
   const { data: userState } = await supabase
     .from("automailsend_app_state")
-    .select("is_blocked, ai_personalization_enabled, ai_credits, ai_temperature")
+    .select("is_blocked, ai_personalization_enabled, ai_credits, ai_temperature, ai_match_strictness")
     .eq("user_id", user_id)
     .single();
 
@@ -434,7 +475,7 @@ async function processJob(job) {
 
   try {
     await logger.start(`Execution started for ${mappings.length} keyword(s) across ${roleDefs.length} role(s)`);
-    const result = await processJobLogic(job, logger, mappings, !!userState?.ai_personalization_enabled, userState?.ai_credits || 0, userState?.ai_temperature);
+    const result = await processJobLogic(job, logger, mappings, !!userState?.ai_personalization_enabled, userState?.ai_credits || 0, userState?.ai_temperature, userState?.ai_match_strictness || 0);
     const detailsObj = { new_emails: result.emails, new_phones: result.phones };
     await logger.finish("success", `Execution finished. Inserted ${result.inserted} new unique records.`, detailsObj);
     return result;

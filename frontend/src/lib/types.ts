@@ -500,8 +500,11 @@ export type AutomailConfig = {
 // The AI tab (2026-08-18) — AI now has its own real settings page, so its config moved out of
 // AutomailConfig instead of being nested under "Automail" naming. `credits` stays a separate top-level
 // field on PersistedState (admin-controlled, never written from here — see saveAppState).
-// `matchStrictness` (0-100) only gates automail.worker.js's fully-automated background loop — never
-// JAMS's manual/bulk sends — and a recipient with no match_score yet is never gated by it.
+// `matchStrictness` (0-100) gates two things, never JAMS's manual/bulk sends: automail.worker.js's
+// fully-automated background loop (skips a low-scoring pending recipient before sending), and, since
+// 2026-08-28, scraper.worker.js itself (a post scored below this at scrape time is never saved as a
+// recipient at all — see scraper.worker.js's saveContacts). A recipient/post with no match_score yet
+// is never gated by either.
 export type AiConfig = {
   enabled: boolean;
   temperature: number; // 0-1, Gemini generationConfig.temperature for every AI call

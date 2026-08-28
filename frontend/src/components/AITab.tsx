@@ -107,9 +107,10 @@ export function AITab({ ai, aiCredits, onSave }: Props) {
                 title="Job-Match Strictness"
                 content={
                   <>
-                    <p>Automail's fully-automated background sends will skip a recipient entirely — no template, no AI, no send, no credit spent — when that recipient's scraped job post scored below this on Jobs &amp; Roles.</p>
-                    <p>A post that hasn't been scored yet is <strong>never</strong> skipped by this — only ones that were actually scored low.</p>
-                    <p>This only affects Automail's background runs. It has no effect on JAMS's manual or bulk sends — those go out exactly as you asked, regardless of score.</p>
+                    <p>Scraping now checks this too: a post scored below this against a role's criteria on Jobs &amp; Roles is never saved as a contact in the first place — it's judged and skipped, not left "not analyzed."</p>
+                    <p>Automail's fully-automated background sends still also check it as a second safety net — skipping a recipient entirely (no template, no AI, no send, no credit spent) if an older, already-saved one scores below this.</p>
+                    <p>A post that hasn't been scored yet is <strong>never</strong> skipped by either — only ones that were actually scored low.</p>
+                    <p>This has no effect on JAMS's manual or bulk sends — those go out exactly as you asked, regardless of score.</p>
                   </>
                 }
               />

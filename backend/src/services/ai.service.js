@@ -149,7 +149,7 @@ async function callAiJson(systemPrompt, userPrompt, temperature) {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) throw new Error("GEMINI_API_KEY is not configured on the server.");
 
-  let retries = 3;
+  let retries = 4;
   let delay = 2000;
 
   for (let attempt = 1; attempt <= retries; attempt++) {
@@ -167,7 +167,15 @@ async function callAiJson(systemPrompt, userPrompt, temperature) {
       }, { timeout: 20000 });
       return JSON.parse(res.data.candidates[0].content.parts[0].text);
     } catch (error) {
-      if (error.response && error.response.status === 429 && attempt < retries) {
+      // 429 (rate limited) and 503 (Gemini's own "high demand, try again later" — confirmed live
+      // 2026-08-28: every single call was failing this way, and this branch previously only covered
+      // 429, so a Gemini capacity blip silently killed matching/personalization outright with zero
+      // retry) both mean "try again shortly," not "this request is broken" — 502/504 are the same
+      // class of transient gateway failure. Anything else (400 malformed request, 403 bad key, etc.)
+      // is a real error and should still fail immediately, not retry into the same wall 4 times.
+      const status = error.response && error.response.status;
+      const isTransient = status === 429 || status === 503 || status === 502 || status === 504;
+      if (isTransient && attempt < retries) {
         await sleep(delay);
         delay *= 2; // exponential backoff
         continue;
