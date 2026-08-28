@@ -69,14 +69,12 @@ export default function SignUpPage() {
       setError(error.message);
       setLoading(false);
     } else {
-      setSuccess(
-        accountType === "recruiter"
-          ? "Recruiter account created! You can now log in and start posting jobs."
-          : "Account created successfully! You can now log in."
-      );
+      // The project requires email confirmation (mailer_autoconfirm is off) — signInWithPassword will
+      // fail with error.code "email_not_confirmed" until the link below is clicked, so don't tell people
+      // they can log in immediately.
+      setSuccess("Account created! Check your email for a confirmation link before logging in.");
       setLoading(false);
-      // Optional: automatically redirect to login after a few seconds
-      setTimeout(() => router.push("/login"), 3000);
+      setTimeout(() => router.push("/login"), 4000);
     }
   }
 

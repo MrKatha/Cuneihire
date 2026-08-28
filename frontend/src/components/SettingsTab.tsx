@@ -1,6 +1,7 @@
 "use client";
 
 import { EmailConfigTab } from "./EmailConfigTab";
+import { TwoFactorSettings } from "./TwoFactorSettings";
 import {
   autoFetchLinkedInConnected,
   type AutoFetchConfig,
@@ -198,6 +199,10 @@ export function SettingsTab({
             {passwordLoading ? "Updating..." : "Update Password"}
           </button>
         </form>
+      </Card>
+
+      <Card title="Two-Factor Authentication">
+        <TwoFactorSettings />
       </Card>
     </div>
   );

@@ -3,6 +3,9 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import toast from "react-hot-toast";
+import type { Session } from "@supabase/supabase-js";
+import { needsMfaChallenge } from "@/lib/mfa";
+import { MfaChallenge } from "@/components/MfaChallenge";
 
 // Localhost-only dev convenience: auto sign in with a dedicated dev account instead of showing the
 // login form, so local development doesn't require re-entering credentials every time. Gated on BOTH
@@ -147,6 +150,10 @@ export default function Home() {
   const [isAdmin, setIsAdmin] = useState(false);
   const [showLanding, setShowLanding] = useState(false);
   const devLoginAttempted = useRef(false);
+  // TOTP challenge gate (2026-08-28, login/logout auth-flow rework) — set true when a session exists but
+  // hasn't cleared needsMfaChallenge() yet; blocks setUserId(...) below so a not-yet-elevated (aal1)
+  // session never counts as "logged in" for an account with 2FA enrolled. See lib/mfa.ts.
+  const [mfaRequired, setMfaRequired] = useState(false);
   
   const [hydrated, setHydrated] = useState(false);
   const [config, setConfig] = useState<SmtpConfig>(defaultState().config);
@@ -255,13 +262,29 @@ export default function Home() {
       }
     };
 
+    // Shared by both branches below — a session existing isn't enough to count as "logged in" for an
+    // account with a verified TOTP factor. needsMfaChallenge() covers all three login methods (password,
+    // magic-link-via-callback, email-code-direct-verify) from this one choke point, since Supabase computes
+    // aal purely from the account's enrolled factors, not from how the session was created.
+    const admitSession = (session: Session) => {
+      needsMfaChallenge().then((required) => {
+        if (required) {
+          setMfaRequired(true);
+          return;
+        }
+        setMfaRequired(false);
+        setShowLanding(false);
+        setUserId(session.user.id);
+        const adminEmails = (process.env.NEXT_PUBLIC_ADMIN_EMAILS || "").split(",");
+        setIsAdmin(adminEmails.includes(session.user.email || ""));
+      });
+    };
+
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (!session) {
         handleNoSession();
       } else {
-        setUserId(session.user.id);
-        const adminEmails = (process.env.NEXT_PUBLIC_ADMIN_EMAILS || "").split(",");
-        setIsAdmin(adminEmails.includes(session.user.email || ""));
+        admitSession(session);
       }
     });
 
@@ -270,12 +293,10 @@ export default function Home() {
     } = supabase.auth.onAuthStateChange((_event, session) => {
       if (!session) {
         setUserId(null);
+        setMfaRequired(false);
         handleNoSession();
       } else {
-        setShowLanding(false);
-        setUserId(session.user.id);
-        const adminEmails = (process.env.NEXT_PUBLIC_ADMIN_EMAILS || "").split(",");
-        setIsAdmin(adminEmails.includes(session.user.email || ""));
+        admitSession(session);
       }
     });
 
@@ -806,6 +827,10 @@ export default function Home() {
 
   if (showLanding) {
     return <LandingPage />;
+  }
+
+  if (mfaRequired) {
+    return <MfaChallenge onVerified={() => setMfaRequired(false)} />;
   }
 
   if (!hydrated || !userId) {
