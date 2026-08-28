@@ -9,6 +9,11 @@ const DEFAULT_GLOBAL_SETTINGS = {
   min_pagination_delay: 5,
   max_pagination_limit: 10,
   allow_signups: true,
+  // Algorithmic match-scoring escalation band (2026-08-28) — a score at or beyond either threshold is
+  // "confident enough," skip the AI call; a score between them is borderline, escalate to AI. See
+  // matchAlgorithm.service.js's shouldEscalateToAI.
+  algo_match_escalate_low: 20,
+  algo_match_escalate_high: 80,
 };
 
 async function getGlobalSettings() {

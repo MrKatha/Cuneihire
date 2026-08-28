@@ -800,3 +800,18 @@ update public.automailsend_role_defs
   set employment_types = array[employment_type]
   where employment_type is not null and employment_type <> 'any'
     and (employment_types is null or employment_types = '{}');
+
+-- Phase 2 task 1 (2026-08-28) — deterministic match-scoring algorithm, AI as a supplement. Two escalation
+-- thresholds (a score at/beyond either is "confident, skip AI"; between them escalates to a real Gemini
+-- call) plus provenance tracking for which engine actually produced a post's match_score.
+alter table public.automailsend_global_settings
+  add column if not exists algo_match_escalate_low integer not null default 20,
+  add column if not exists algo_match_escalate_high integer not null default 80;
+
+alter table public.automailsend_job_posts
+  add column if not exists match_source text, -- 'algorithm' | 'ai', null = legacy/unscored
+  add column if not exists match_algo_score integer, -- the algorithm's own verdict, even when AI decided
+  add column if not exists match_algo_reasoning text;
+
+alter table public.automailsend_recipients
+  add column if not exists match_source text;

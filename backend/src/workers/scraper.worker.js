@@ -3,32 +3,12 @@ const axios = require("axios");
 const { supabase } = require("../config/supabase");
 const { extractContactsWithAttribution, extractInitialContacts, extractPaginatedContacts } = require("../services/extraction.service");
 const { scoreJobMatch } = require("../services/ai.service");
+const { roleHasCriteria, computeAlgorithmicMatch, shouldEscalateToAI } = require("../services/matchAlgorithm.service");
 const { ExecutionLogger } = require("../lib/logger");
 const { getGlobalSettings } = require("../lib/globalSettings");
 const { spendAiCredit } = require("../lib/aiCredits");
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-
-// A role is worth scoring against if it has any real criteria set — an all-'any'/empty role has nothing
-// for the AI to check, so posts found for it just stay unscored (shown in JAMS as "no criteria set", never
-// a fake 0). Mirrors ai.service.js's buildRoleCriteriaBlock/buildExcludeKeywordsBlock/
-// buildAiInstructionsBlock field-by-field — a role with only exclude keywords or AI instructions set (and
-// every structured field left "any") still needs scoring, since those two are themselves real filtering
-// criteria (2026-08-25).
-function roleHasCriteria(role) {
-  if (!role) return false;
-  return Boolean(
-    (Array.isArray(role.work_modes) && role.work_modes.length > 0) ||
-    (Array.isArray(role.employment_types) && role.employment_types.length > 0) ||
-    (Array.isArray(role.company_sizes) && role.company_sizes.length > 0) ||
-    (role.visa_sponsorship && role.visa_sponsorship !== "any") ||
-    role.salary_min != null ||
-    role.salary_max != null ||
-    (Array.isArray(role.preferred_locations) && role.preferred_locations.length > 0) ||
-    (Array.isArray(role.exclude_keywords) && role.exclude_keywords.length > 0) ||
-    (role.ai_instructions && role.ai_instructions.trim())
-  );
-}
 
 // `mappings` (a flat [{keyword, role, roleDef}, ...] list, one entry per keyword/alias across all of the
 // user's roles) is resolved by processJob() before this is called — see automailsend_role_defs.keywords.
@@ -52,6 +32,11 @@ async function processJobLogic(job, logger, mappings, aiEnabled, aiCredits, aiTe
   // Local mutable tracker — multiple posts can get scored in one run, each spending one credit.
   let remainingCredits = aiCredits || 0;
   let aiCreditsExhaustedLogged = false;
+
+  // Hoisted here (2026-08-28) — used to already be fetched later, inside the pagination branch, only for
+  // maxPages/delayMs. saveContacts (defined below) also needs it now, for the algorithmic-match escalation
+  // thresholds. getGlobalSettings() is 60s-cached, so calling it once up front costs nothing extra.
+  const globalSettings = await getGlobalSettings();
 
   let headers;
   try {
@@ -111,7 +96,7 @@ async function processJobLogic(job, logger, mappings, aiEnabled, aiCredits, aiTe
         { user_id, source_url: sourceUrl, context_text: contextText || null, ...(authorName ? { author_name: authorName } : {}) },
         { onConflict: "user_id,source_url" }
       )
-      .select("id, match_analyzed_at, match_score, match_reasoning")
+      .select("id, match_analyzed_at, match_score, match_reasoning, match_source")
       .single();
     if (error) {
       await logger.append("WARN", `Failed to upsert job post (${sourceUrl.slice(0, 60)}...): ${error.message}`);
@@ -120,7 +105,7 @@ async function processJobLogic(job, logger, mappings, aiEnabled, aiCredits, aiTe
     }
     // needsScoring stays true across this whole run until a scoring attempt actually succeeds (see
     // saveContacts below) — a transient AI failure should be retried on the *next* scrape run, not
-    // permanently marked "analyzed" with no score. matchScore/matchReasoning carry forward an
+    // permanently marked "analyzed" with no score. matchScore/matchReasoning/matchSource carry forward an
     // already-scored post's result (from this run or a prior one) so a later-arriving new contact on
     // the same post can still be gated without re-spending a credit to re-score it.
     const entry = {
@@ -128,6 +113,7 @@ async function processJobLogic(job, logger, mappings, aiEnabled, aiCredits, aiTe
       needsScoring: !data.match_analyzed_at,
       matchScore: data.match_score ?? null,
       matchReasoning: data.match_reasoning ?? null,
+      matchSource: data.match_source ?? null,
     };
     jobPostIdCache.set(sourceUrl, entry);
     return entry;
@@ -158,36 +144,75 @@ async function processJobLogic(job, logger, mappings, aiEnabled, aiCredits, aiTe
       let matchScore = jobPost ? jobPost.matchScore : null;
       let matchReasoning = jobPost ? jobPost.matchReasoning : null;
 
-      // JAMS match scoring — once per newly-seen post, only when AI is configured and the role
-      // actually has criteria worth checking (see docs/memory.md's "Job matching" section).
-      // Seeded from a prior run's score when there is one, so a contact that only shows up on a
-      // post scored earlier still gets that score denormalized onto its own recipient row below
-      // (otherwise it would insert with match_score null and display "Not analyzed" despite the
-      // post itself having already been judged and having gated this very insert above).
-      let matchFields = matchScore != null ? { match_score: matchScore, match_reasoning: matchReasoning } : {};
-      if (jobPost && jobPost.needsScoring && aiEnabled && remainingCredits > 0 && roleHasCriteria(roleDef)) {
-        try {
-          const match = await scoreJobMatch(group.contextText, group.source_url, roleDef, aiTemperature);
-          const spent = await spendAiCredit(supabase, user_id);
-          remainingCredits = spent ? remainingCredits - 1 : 0;
-          if (match) {
-            matchFields = {
-              match_score: match.score,
-              match_reasoning: match.reasoning,
-              match_analyzed_at: new Date().toISOString(),
-            };
-            await supabase.from("automailsend_job_posts").update(matchFields).eq("id", jobPostId);
-            jobPost.needsScoring = false;
-            matchScore = match.score;
-            matchReasoning = match.reasoning;
-            await logger.append("INFO", `Scored job post ${match.score}/100 against role '${roleToAssign}': ${match.reasoning}`);
+      // JAMS match scoring (2026-08-28, Phase 2 task 1 — operator ask: "work on the algorithm first,"
+      // AI supplements it rather than being the sole engine). The deterministic algorithm always runs
+      // first, for free — a post only gets an actual Gemini call when the algorithm itself can't resolve
+      // it confidently (see matchAlgorithm.service.js's shouldEscalateToAI). Seeded from a prior run's
+      // score/source when there is one, so a contact that only shows up on an already-scored post still
+      // gets that denormalized onto its own recipient row below.
+      let matchSource = jobPost ? jobPost.matchSource : null;
+      let matchFields = matchScore != null ? { match_score: matchScore, match_reasoning: matchReasoning, match_source: matchSource } : {};
+
+      const applyMatchResult = async (score, reasoning, source, algoResult) => {
+        matchFields = {
+          match_score: score,
+          match_reasoning: reasoning,
+          match_source: source,
+          match_analyzed_at: new Date().toISOString(),
+          ...(algoResult ? { match_algo_score: algoResult.score, match_algo_reasoning: algoResult.reasoning } : {}),
+        };
+        await supabase.from("automailsend_job_posts").update(matchFields).eq("id", jobPostId);
+        jobPost.needsScoring = false;
+        matchScore = score;
+        matchReasoning = reasoning;
+        matchSource = source;
+      };
+
+      if (jobPost && jobPost.needsScoring && roleHasCriteria(roleDef)) {
+        const algoResult = computeAlgorithmicMatch(group.contextText, roleDef);
+        const escalate = shouldEscalateToAI(algoResult, roleDef, {
+          aiEnabled,
+          remainingCredits,
+          lowThreshold: globalSettings.algo_match_escalate_low ?? 20,
+          highThreshold: globalSettings.algo_match_escalate_high ?? 80,
+        });
+
+        if (escalate) {
+          try {
+            const match = await scoreJobMatch(group.contextText, group.source_url, roleDef, aiTemperature);
+            const spent = await spendAiCredit(supabase, user_id);
+            remainingCredits = spent ? remainingCredits - 1 : 0;
+            if (match) {
+              await applyMatchResult(match.score, match.reasoning, "ai", algoResult);
+              await logger.append(
+                "INFO",
+                `Scored (AI) ${match.score}/100 for role '${roleToAssign}'${algoResult ? ` (algorithm said ${algoResult.score})` : ""}: ${match.reasoning}`
+              );
+            } else if (algoResult) {
+              await applyMatchResult(algoResult.score, algoResult.reasoning, "algorithm", algoResult);
+            }
+          } catch (err) {
+            // AI failure now falls back to the algorithmic score instead of leaving the post fully
+            // unscored (2026-08-28) — a deliberate behavior change from before: an AI outage used to mean
+            // every post silently bypassed the match-strictness gate for the rest of the run ("unscored
+            // isn't a fail"). Now a Gemini outage still gets SOME enforcement.
+            if (algoResult) {
+              await applyMatchResult(algoResult.score, algoResult.reasoning, "algorithm", algoResult);
+              await logger.append("WARN", `AI match scoring failed for ${group.source_url}, used the algorithmic score ${algoResult.score} instead: ${err.message}`);
+            } else {
+              await logger.append("WARN", `Job match scoring failed for ${group.source_url}: ${err.message}`);
+            }
           }
-        } catch (err) {
-          await logger.append("WARN", `Job match scoring failed for ${group.source_url}: ${err.message}`);
+        } else if (algoResult) {
+          await applyMatchResult(algoResult.score, algoResult.reasoning, "algorithm", algoResult);
+          await logger.append("INFO", `Scored (algorithm, 0 AI credits) ${algoResult.score}/100 for role '${roleToAssign}': ${algoResult.reasoning}`);
+        } else if (aiEnabled && remainingCredits <= 0 && !aiCreditsExhaustedLogged) {
+          // Only reachable when the role has ONLY AI-only criteria set (company_sizes/ai_instructions/
+          // visa_sponsorship) and credits are exhausted — everything else now gets an algorithmic score
+          // regardless of credits.
+          await logger.append("WARN", `Out of AI credits — posts needing AI-only judgment (free-text AI instructions, company size, visa sponsorship) won't be scored for the rest of this run.`);
+          aiCreditsExhaustedLogged = true;
         }
-      } else if (jobPost && jobPost.needsScoring && aiEnabled && !aiCreditsExhaustedLogged) {
-        await logger.append("WARN", `Out of AI credits — job posts won't be scored for the rest of this run.`);
-        aiCreditsExhaustedLogged = true;
       }
 
       // Enforce the match, don't just record it (2026-08-28, operator ask — "if the job does not match
@@ -320,7 +345,6 @@ async function processJobLogic(job, logger, mappings, aiEnabled, aiCredits, aiTe
       const count = Number((raw.match(/"count"\s*:\s*(\d+)/) || [])[1] || 3);
       let clusterStartPosition = Number((raw.match(/"clusterStartPosition"\s*:\s*(\d+)/) || [])[1] || 9);
       
-      const globalSettings = await getGlobalSettings();
       let maxPages = auto_fetch_pagination_limit || 1;
       maxPages = Math.min(maxPages, globalSettings.max_pagination_limit || 10);
 
