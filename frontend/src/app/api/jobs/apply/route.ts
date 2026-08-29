@@ -112,7 +112,7 @@ export async function POST(request: NextRequest) {
       const gate = await checkAtsAiGate(posting.recruiter_id);
       if (gate.ok) {
         try {
-          const result = await scoreApplicationMatch(resumeData as any, posting, undefined);
+          const result = await scoreApplicationMatch(resumeData as any, posting, undefined, posting.recruiter_id);
           if (result) {
             await spendAtsAiCredit(posting.recruiter_id);
             aiScore = result.score;

@@ -2,6 +2,21 @@
 
 Newest on top. Terse bullets only — done / in-progress / locked decisions / open items. Update every phase.
 
+- **2026-08-29 — DONE: Cost & usage metering per user (Phase 3 task 1, ClickUp `86eyrp548`).** Two new
+  ledgers, `automailsend_ai_usage_log` (real Gemini token counts + $ cost, computed at insert time from a
+  runtime-date-branched pricing constant — `getGeminiRates()` in `backend/src/lib/aiUsage.js` and its inline
+  twin in `frontend/src/lib/aiClient.ts`, KEEP IN SYNC) and `automailsend_infra_usage_log` (Resend auth-email
+  cost, an approximation, keyed by email not user_id since every one of those 4 call sites fires before a
+  session exists). `callAiJson` (both codebases, not exported) gained `userId`/`callType` trailing params
+  and logs right after the Gemini response arrives, before `JSON.parse` — return shape unchanged, so none of
+  the 7 real callers' worker/route branching needed touching. New admin-portal "Cost" tab per user +
+  "Total Platform Spend" tile on Overview. **Investigated during planning and scoped down: bulk email sends
+  cost the operator $0** (each user sends through their own SMTP, `automailsend_smtp_accounts`) — only
+  Resend-billed auth emails (signup/magic-link/reset/OTP) are logged, not bulk sends. No backfill (nothing
+  was ever captured historically). Verified live: direct synthetic writes to both new tables via the real
+  `logAiUsage`/`/api/log-infra-usage` code paths (not a live worker run — declined to trigger the real
+  scraper against production users just to test this), rows landed with correct computed cost, cleaned up
+  after.
 - **2026-08-26 — DONE: pill multi-select for work mode/employment type/company size.** New shared
   `MultiSelectChipField` in `JobsRolesTab.tsx` (pick-from-a-list-then-remove-the-pill, same visual as the
   pre-existing "Preferred countries" chip field) replaces single-select dropdowns for all three — legacy

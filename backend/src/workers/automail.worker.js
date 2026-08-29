@@ -259,7 +259,7 @@ async function runAutomailJobs(supabase) {
           }
           if (aiEnabled && user.ai_credits > 0) {
             try {
-              template = await chooseTemplateForJob(roleTemplates, recipient.role, recipient.context_text, aiTemperature);
+              template = await chooseTemplateForJob(roleTemplates, recipient.role, recipient.context_text, aiTemperature, userId);
               if (template) {
                 const spent = await spendAiCredit(supabase, userId);
                 user.ai_credits = spent ? user.ai_credits - 1 : 0;
@@ -289,7 +289,7 @@ async function runAutomailJobs(supabase) {
           }
           let result;
           try {
-            result = await generateAiPersonalizedEmail(user.candidate_info, recipient, recipient.context_text, null, profile, aiTemperature);
+            result = await generateAiPersonalizedEmail(user.candidate_info, recipient, recipient.context_text, null, profile, aiTemperature, userId);
           } catch (aiErr) {
             await logger.append("ERROR", `AI write failed for ${recipient.email}: ${aiErr.message}. Skipping.`);
             continue;

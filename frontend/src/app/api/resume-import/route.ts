@@ -46,7 +46,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const data = await parseResumeText(text, gate.temperature);
+    const data = await parseResumeText(text, gate.temperature, userId);
     await spendAiCredit(userId);
     return NextResponse.json({ success: true, data });
   } catch (error) {

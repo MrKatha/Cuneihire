@@ -5,6 +5,7 @@ import { supabase } from "@/lib/supabase";
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import HexMark from "@/components/ui/HexMark";
+import { logInfraUsage } from "@/lib/logInfraUsage";
 
 export default function ForgotPasswordPage() {
   const [email, setEmail] = useState("");
@@ -19,9 +20,11 @@ export default function ForgotPasswordPage() {
     });
     // Always show the same outcome regardless of whether the account exists or the call errored —
     // Supabase's own API doesn't leak account existence on this endpoint either; matching that here
-    // avoids turning "forgot password" into an email-enumeration tool.
+    // avoids turning "forgot password" into an email-enumeration tool. Same reasoning applies to logging
+    // the send attempt below: don't distinguish success from failure, log unconditionally.
     setLoading(false);
     setSent(true);
+    logInfraUsage(email, "password_reset");
   }
 
   return (

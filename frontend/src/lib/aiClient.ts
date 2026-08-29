@@ -29,6 +29,44 @@ function truncateForPrompt(text: string, maxLen: number): string {
 // the live key, 2026-08-25); using the "-latest" alias on purpose so this doesn't silently go stale again.
 const GEMINI_MODEL = "gemini-flash-latest";
 
+// Cost metering (2026-08-29, Phase 3) — logs one row per Gemini call to automailsend_ai_usage_log: real
+// token counts (from Gemini's own usageMetadata, previously discarded entirely here) plus a $ cost computed
+// at insert time from the rate in effect then, so historical rows stay accurate after a future rate change.
+// KEEP IN SYNC with backend/src/lib/aiUsage.js's twin — same rates, same table, same call_type labels.
+// Inlined here rather than a separate lib file — this file already keeps spendAiCredit/checkAiGate/
+// spendAtsAiCredit inline rather than split out, unlike the backend's aiCredits.js/ai.service.js split.
+function getGeminiRates() {
+  const stepAt = Date.UTC(2027, 0, 1); // Google's published rate card steps up on this date
+  if (Date.now() < stepAt) {
+    return { inputPerMillion: 0.75, outputPerMillion: 3.75, tier: "introductory (through 2026-12-31)" };
+  }
+  return { inputPerMillion: 1.5, outputPerMillion: 7.5, tier: "standard (from 2027-01-01)" };
+}
+
+type GeminiUsageMetadata = { promptTokenCount?: number; candidatesTokenCount?: number; totalTokenCount?: number };
+
+// Never throws into callAiJson's own error handling — see the try/catch around its call site below. Its
+// own contract is simpler: "write the row or throw."
+async function logAiUsage(userId: string | undefined, callType: string, usageMetadata: GeminiUsageMetadata | undefined) {
+  const promptTokens = usageMetadata?.promptTokenCount || 0;
+  const completionTokens = usageMetadata?.candidatesTokenCount || 0;
+  const totalTokens = usageMetadata?.totalTokenCount || promptTokens + completionTokens;
+  const rates = getGeminiRates();
+  const costUsd = (promptTokens / 1_000_000) * rates.inputPerMillion + (completionTokens / 1_000_000) * rates.outputPerMillion;
+
+  const { error } = await getSupabaseAdmin().from("automailsend_ai_usage_log").insert({
+    user_id: userId || null,
+    call_type: callType,
+    model: GEMINI_MODEL,
+    prompt_tokens: promptTokens,
+    completion_tokens: completionTokens,
+    total_tokens: totalTokens,
+    cost_usd: costUsd,
+    pricing_snapshot: rates,
+  });
+  if (error) throw new Error(error.message);
+}
+
 // Rate limiting (2026-08-25, operator ask) — mirrors ai.service.js's MIN_GEMINI_INTERVAL_MS (KEEP IN
 // SYNC), but weaker here by nature: each request is its own serverless invocation, so this module-level
 // state only helps when Vercel happens to reuse a warm instance for back-to-back calls — not a guarantee.
@@ -44,7 +82,9 @@ async function throttleGeminiCall() {
 }
 
 // `temperature` (2026-08-18, the AI tab) — 0-1, user-configurable, defaults to 0.4 when not passed.
-async function callAiJson(systemPrompt: string, userPrompt: string, temperature?: number): Promise<any> {
+// `userId`/`callType` (2026-08-29, cost metering) — optional, purely for usage logging; every real caller
+// below passes both. Logging never affects what this function returns or throws — see the try/catch below.
+async function callAiJson(systemPrompt: string, userPrompt: string, temperature?: number, userId?: string, callType?: string): Promise<any> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) throw new Error("GEMINI_API_KEY is not configured on the server.");
 
@@ -76,6 +116,15 @@ async function callAiJson(systemPrompt: string, userPrompt: string, temperature?
     if (res.status === 429 && attempt < retries) { await sleep(delay); delay *= 2; continue; }
     if (!res.ok) throw new Error(`AI request failed (${res.status}): ${await res.text()}`);
     const data = await res.json();
+    // Log right after the response arrives, before JSON.parse — tokens were spent whether or not the
+    // model's own output happens to parse cleanly. Awaited (not fire-and-forget — this runs inside a
+    // serverless function that can suspend right after the response is sent, which would silently drop an
+    // un-awaited write), but never allowed to fail the actual AI call.
+    try {
+      await logAiUsage(userId, callType || "unknown", data.usageMetadata);
+    } catch (logErr) {
+      console.error(`[aiClient] AI usage logging failed (call itself succeeded): ${(logErr as Error).message}`);
+    }
     return JSON.parse(data.candidates[0].content.parts[0].text);
   }
   throw new Error("AI request failed after retries.");
@@ -179,6 +228,7 @@ export type EnhanceQuickSendInput = {
   recipientRole?: string;
   recipientJobTitle?: string;
   temperature?: number;
+  userId?: string;
 };
 
 export async function enhanceQuickSendEmail(input: EnhanceQuickSendInput): Promise<{ subject: string; body: string }> {
@@ -203,7 +253,7 @@ ${input.recipientJobTitle?.trim() || "unknown"}
 CANDIDATE'S TARGET ROLE CATEGORY:
 ${input.recipientRole?.trim() || "unknown"}`;
 
-  const result = await callAiJson(QUICK_SEND_ENHANCE_SYSTEM_PROMPT, prompt, input.temperature);
+  const result = await callAiJson(QUICK_SEND_ENHANCE_SYSTEM_PROMPT, prompt, input.temperature, input.userId, "quick_send_enhance");
   if (!result || typeof result.subject !== "string" || typeof result.body !== "string") {
     throw new Error("AI response was not in the expected format.");
   }
@@ -232,8 +282,8 @@ Output ONLY this exact JSON shape:
   "languages": [ { "name": "", "level": "" } ]
 }`;
 
-export async function parseResumeText(resumeText: string, temperature?: number): Promise<ResumeData> {
-  const result = await callAiJson(RESUME_IMPORT_SYSTEM_PROMPT, `RESUME TEXT:\n${resumeText.slice(0, 15000)}`, temperature);
+export async function parseResumeText(resumeText: string, temperature?: number, userId?: string): Promise<ResumeData> {
+  const result = await callAiJson(RESUME_IMPORT_SYSTEM_PROMPT, `RESUME TEXT:\n${resumeText.slice(0, 15000)}`, temperature, userId, "resume_import");
   const base = emptyResumeData();
   if (!result || typeof result !== "object") return base;
 
@@ -330,7 +380,8 @@ Output ONLY this JSON shape: {"score": <integer 0-100>, "reasoning": "<one short
 export async function scoreApplicationMatch(
   resumeData: ResumeData,
   posting: Pick<JobPosting, "title" | "description" | "company">,
-  temperature?: number
+  temperature?: number,
+  userId?: string
 ): Promise<{ score: number; reasoning: string } | null> {
   const prompt = `JOB POSTING:
 Title: ${posting.title}
@@ -340,7 +391,7 @@ Description: ${posting.description}
 CANDIDATE RESUME:
 ${serializeResumeForAts(resumeData)}`;
 
-  const result = await callAiJson(JOB_POSTING_MATCH_SYSTEM_PROMPT, prompt, temperature);
+  const result = await callAiJson(JOB_POSTING_MATCH_SYSTEM_PROMPT, prompt, temperature, userId, "score_application_match");
   if (!result || typeof result.score !== "number" || Number.isNaN(result.score)) return null;
   const score = Math.max(0, Math.min(100, Math.round(result.score)));
   const reasoning = typeof result.reasoning === "string" ? result.reasoning.slice(0, 240).trim() : "";

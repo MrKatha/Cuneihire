@@ -62,7 +62,7 @@ async function processJobLogic(job, logger, mappings, aiEnabled, aiCredits, aiTe
     if (!aiEnabled || !(remainingCredits > 0)) return; // same gates as the full-post escalation path
 
     try {
-      const generated = await generateMatchKeywords(roleDef, aiTemperature);
+      const generated = await generateMatchKeywords(roleDef, aiTemperature, user_id);
       const spent = await spendAiCredit(supabase, user_id);
       remainingCredits = spent ? remainingCredits - 1 : 0;
       if (!generated) {
@@ -240,7 +240,7 @@ async function processJobLogic(job, logger, mappings, aiEnabled, aiCredits, aiTe
 
         if (escalate) {
           try {
-            const match = await scoreJobMatch(group.contextText, group.source_url, roleDef, aiTemperature);
+            const match = await scoreJobMatch(group.contextText, group.source_url, roleDef, aiTemperature, user_id);
             const spent = await spendAiCredit(supabase, user_id);
             remainingCredits = spent ? remainingCredits - 1 : 0;
             if (match) {

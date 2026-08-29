@@ -34,6 +34,7 @@ export async function POST(request: NextRequest) {
       recipientRole,
       recipientJobTitle,
       temperature: gate.temperature,
+      userId,
     });
 
     await spendAiCredit(userId);

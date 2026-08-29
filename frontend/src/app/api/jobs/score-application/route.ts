@@ -46,7 +46,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, error: gate.error }, { status: 402 });
     }
 
-    const result = await scoreApplicationMatch(application.resume_data, posting, undefined);
+    const result = await scoreApplicationMatch(application.resume_data, posting, undefined, recruiterId);
     if (!result) {
       return NextResponse.json({ success: false, error: "AI scoring did not return a usable result." }, { status: 502 });
     }

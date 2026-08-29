@@ -189,7 +189,7 @@ async function processBatchSendJob(job) {
         if (roleTemplates.length === 0) continue;
         if (userState.ai_personalization_enabled && userState.ai_credits > 0) {
           try {
-            tpl = await chooseTemplateForJob(roleTemplates, recipient.role, recipient.context_text, userState.ai_temperature);
+            tpl = await chooseTemplateForJob(roleTemplates, recipient.role, recipient.context_text, userState.ai_temperature, user_id);
             if (tpl) {
               const spent = await spendAiCredit(supabase, user_id);
               userState.ai_credits = spent ? userState.ai_credits - 1 : 0;
@@ -215,7 +215,7 @@ async function processBatchSendJob(job) {
         if (!userState.ai_personalization_enabled || !(userState.ai_credits > 0)) continue;
         let result;
         try {
-          result = await generateAiPersonalizedEmail(userState.candidate_info, recipient, recipient.context_text, null, profile, userState.ai_temperature);
+          result = await generateAiPersonalizedEmail(userState.candidate_info, recipient, recipient.context_text, null, profile, userState.ai_temperature, user_id);
         } catch (err) {
           console.error(pc.red(`[BatchSend] AI write failed for ${recipient.email}: ${err.message}. Skipping.`));
           continue;

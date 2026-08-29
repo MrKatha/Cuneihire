@@ -7,6 +7,7 @@ import Link from "next/link";
 import { Eye, EyeOff, ArrowLeft } from "lucide-react";
 import HexMark from "@/components/ui/HexMark";
 import { isCompanyEmail } from "@/lib/companyEmail";
+import { logInfraUsage } from "@/lib/logInfraUsage";
 
 type AccountType = "candidate" | "recruiter";
 
@@ -74,6 +75,7 @@ export default function SignUpPage() {
       // they can log in immediately.
       setSuccess("Account created! Check your email for a confirmation link before logging in.");
       setLoading(false);
+      logInfraUsage(email, "signup_confirm");
       setTimeout(() => router.push("/login"), 4000);
     }
   }

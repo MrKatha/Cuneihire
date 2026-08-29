@@ -854,3 +854,56 @@ drop trigger if exists update_automailsend_staff_modtime on public.automailsend_
 create trigger update_automailsend_staff_modtime
 before update on public.automailsend_staff
 for each row execute function update_modified_column();
+
+-- Cost & usage metering per user (2026-08-29, Phase 3 — "pricing tiers need to be based on real numbers,
+-- not a guess"). Two ledgers, one row per real event, going forward only (no backfill possible — neither
+-- cost source was ever captured historically):
+--
+-- automailsend_ai_usage_log — real Gemini token usage. Insert-only, no updated_at/trigger (matches
+-- automailsend_sent_log/automailsend_execution_logs). cost_usd is computed AT INSERT TIME from the rate in
+-- effect then (see backend/src/lib/aiUsage.js / frontend/src/lib/aiClient.ts's getGeminiRates, KEEP IN
+-- SYNC) so historical rows stay accurate after the 2027-01-01 rate step. call_type is one label per
+-- exported AI-calling function (not per worker) — 7 distinct values across both codebases.
+create table if not exists public.automailsend_ai_usage_log (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid references auth.users, -- nullable defensively; every current call site has one in scope
+  call_type text not null,
+  model text not null,
+  prompt_tokens integer not null default 0,
+  completion_tokens integer not null default 0,
+  total_tokens integer not null default 0,
+  cost_usd numeric(12, 8) not null default 0,
+  pricing_snapshot jsonb,
+  created_at timestamp with time zone default timezone('utc'::text, now())
+);
+
+-- No other table in this file has an explicit `create index` — a deliberate departure here: this table
+-- grows on every single AI call, and the admin overview route needs a platform-wide SUM(cost_usd) over it.
+create index if not exists idx_automailsend_ai_usage_log_user_created
+  on public.automailsend_ai_usage_log (user_id, created_at desc);
+create index if not exists idx_automailsend_ai_usage_log_created
+  on public.automailsend_ai_usage_log (created_at desc);
+
+alter table public.automailsend_ai_usage_log enable row level security;
+
+-- automailsend_infra_usage_log — Resend auth-email cost (signup confirm, magic link, password reset, OTP
+-- code, resend confirmation), an approximation using Resend's published overage rate, not a metered figure
+-- like the AI table above. Bulk email sends are NOT logged here — they cost the operator $0, each user
+-- sends through their own SMTP credentials (automailsend_smtp_accounts), confirmed during this task's
+-- planning. Keyed on email, not user_id: every one of these events fires BEFORE a session exists (that's
+-- the point of magic-link/password-reset/signup-confirm/OTP), so there is no uuid to key on at insert time
+-- — the admin routes join this back to a user by email instead.
+create table if not exists public.automailsend_infra_usage_log (
+  id uuid primary key default gen_random_uuid(),
+  email text not null,
+  event_type text not null,
+  provider text not null default 'resend',
+  cost_usd numeric(12, 8) not null default 0,
+  pricing_snapshot jsonb,
+  created_at timestamp with time zone default timezone('utc'::text, now())
+);
+
+create index if not exists idx_automailsend_infra_usage_log_email_created
+  on public.automailsend_infra_usage_log (email, created_at desc);
+
+alter table public.automailsend_infra_usage_log enable row level security;

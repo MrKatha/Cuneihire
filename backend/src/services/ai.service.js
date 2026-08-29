@@ -1,4 +1,5 @@
 const axios = require("axios");
+const { logAiUsage } = require("../lib/aiUsage");
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -145,7 +146,10 @@ async function throttleGeminiCall() {
 
 // `temperature` (2026-08-18, the AI tab) — 0-1, user-configurable, defaults to 0.4 if not passed (a
 // caller that hasn't been updated yet, or an undefined app_state row for a brand-new user).
-async function callAiJson(systemPrompt, userPrompt, temperature) {
+// `userId`/`callType` (2026-08-29, cost metering) — optional, purely for usage logging (see lib/aiUsage.js);
+// every real caller below passes both, but they're optional here so this function never *requires* a user
+// context to work. Logging never affects what this function returns or throws — see the try/catch around it.
+async function callAiJson(systemPrompt, userPrompt, temperature, userId, callType) {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) throw new Error("GEMINI_API_KEY is not configured on the server.");
 
@@ -165,6 +169,14 @@ async function callAiJson(systemPrompt, userPrompt, temperature) {
         contents: [{ parts: [{ text: userPrompt }] }],
         generationConfig: { responseMimeType: "application/json", temperature: typeof temperature === "number" ? temperature : 0.4 }
       }, { timeout: 20000 });
+      // Log right after the response arrives, before JSON.parse — tokens were spent whether or not the
+      // model's own output happens to parse cleanly. Awaited, but never allowed to fail the actual AI
+      // call: a logging hiccup should never turn a successful Gemini response into a thrown error.
+      try {
+        await logAiUsage(userId, callType, res.data.usageMetadata, GEMINI_MODEL);
+      } catch (logErr) {
+        console.error(`[ai.service] AI usage logging failed (call itself succeeded): ${logErr.message}`);
+      }
       return JSON.parse(res.data.candidates[0].content.parts[0].text);
     } catch (error) {
       // 429 (rate limited) and 503 (Gemini's own "high demand, try again later" — confirmed live
@@ -188,9 +200,9 @@ async function callAiJson(systemPrompt, userPrompt, temperature) {
 // "ai-write" send mode (2026-08-20, restored — was dropped 2026-08-19, then brought back per operator
 // ask) — writes subject+body entirely from scratch, no template involved (`baseTemplate` is passed as
 // null from both workers in this mode). Called from automail.worker.js/batchSend.worker.js.
-async function generateAiPersonalizedEmail(candidateInfo, recipient, contextText, baseTemplate, profile, temperature) {
+async function generateAiPersonalizedEmail(candidateInfo, recipient, contextText, baseTemplate, profile, temperature, userId) {
   const prompt = buildUserMessage(candidateInfo, contextText, baseTemplate, recipient, profile);
-  return callAiJson(JOB_APPLICATION_SYSTEM_PROMPT, prompt, temperature);
+  return callAiJson(JOB_APPLICATION_SYSTEM_PROMPT, prompt, temperature, userId, "generate_personalized_email");
 }
 
 // "ai-select" send mode (2026-08-19) — AI picks which of the role's OWN, user-written templates best
@@ -226,11 +238,11 @@ ${contextText && contextText.trim() ? contextText.trim() : "No text was captured
 // (empty pool) or the AI response didn't name a real id — callers should fall back to the pool's first
 // template on null, never block a send over a picker failure. A single-template pool skips the AI call
 // entirely — there's nothing to choose between.
-async function chooseTemplateForJob(templates, roleLabel, contextText, temperature) {
+async function chooseTemplateForJob(templates, roleLabel, contextText, temperature, userId) {
   if (!templates || templates.length === 0) return null;
   if (templates.length === 1) return templates[0];
   const prompt = buildTemplateChoicePrompt(templates, roleLabel, contextText);
-  const result = await callAiJson(TEMPLATE_CHOICE_SYSTEM_PROMPT, prompt, temperature);
+  const result = await callAiJson(TEMPLATE_CHOICE_SYSTEM_PROMPT, prompt, temperature, userId, "choose_template");
   if (!result || typeof result.templateId !== "string") return null;
   return templates.find((t) => t.id === result.templateId) || null;
 }
@@ -313,7 +325,7 @@ function buildAiInstructionsBlock(role) {
 // Returns { score: 0-100, reasoning: string } or null when there's nothing to score at all (no structured
 // criteria, no exclude keywords, no AI instructions) or the AI response didn't come back in the expected
 // shape — callers should treat null as "leave match_score unset", never as a 0.
-async function scoreJobMatch(contextText, sourceUrl, role, temperature) {
+async function scoreJobMatch(contextText, sourceUrl, role, temperature, userId) {
   const criteria = buildRoleCriteriaBlock(role);
   const excludeKeywords = buildExcludeKeywordsBlock(role);
   const aiInstructions = buildAiInstructionsBlock(role);
@@ -334,7 +346,7 @@ ${excludeKeywords}` : ""}
 CANDIDATE'S CRITERIA:
 ${criteria || "None set."}`;
 
-  const result = await callAiJson(JOB_MATCH_SYSTEM_PROMPT, prompt, temperature);
+  const result = await callAiJson(JOB_MATCH_SYSTEM_PROMPT, prompt, temperature, userId, "score_job_match");
   if (!result || typeof result.score !== "number" || Number.isNaN(result.score)) return null;
   const score = Math.max(0, Math.min(100, Math.round(result.score)));
   const reasoning = typeof result.reasoning === "string" ? result.reasoning.slice(0, 200).trim() : "";
@@ -422,10 +434,10 @@ function sanitizeMatchKeywordList(list, maxItems) {
 // Returns { positive, negative, promptSnapshot } or null when there's nothing to translate (no
 // ai_instructions set) or the AI response didn't come back in the expected shape. promptSnapshot is the
 // exact string to persist as match_keywords_source_snapshot — callers should not rebuild it separately.
-async function generateMatchKeywords(role, temperature) {
+async function generateMatchKeywords(role, temperature, userId) {
   const prompt = buildMatchKeywordsPrompt(role);
   if (!prompt) return null;
-  const result = await callAiJson(MATCH_KEYWORDS_SYSTEM_PROMPT, prompt, temperature);
+  const result = await callAiJson(MATCH_KEYWORDS_SYSTEM_PROMPT, prompt, temperature, userId, "generate_match_keywords");
   if (!result || typeof result !== "object") return null;
   return {
     positive: sanitizeMatchKeywordList(result.positive, MAX_POSITIVE_MATCH_KEYWORDS),

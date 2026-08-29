@@ -42,6 +42,10 @@ type OverviewData = {
   totalEmailsSent: number;
   totalReplies: number;
   totalAiCreditsRemaining: number;
+  // Cost metering (2026-08-29) — real ledgers now (automailsend_ai_usage_log/automailsend_infra_usage_log),
+  // not derived from the credit-balance field above.
+  totalAiSpendUsd: number;
+  totalInfraSpendUsd: number;
   recentFailures24h: number;
   workerHealth: { jobType: string; lastRunAt: string | null; lastStatus: string | null }[];
 };
@@ -204,7 +208,7 @@ export function AdminPortal({ role }: Props) {
       {activeTopTab === "overview" && (
         <section className="panel">
           <h2 className="panel-title">Overall Status</h2>
-          <p className="hint">A live snapshot across every user — not a historical trend (no usage ledger exists yet).</p>
+          <p className="hint">A live snapshot across every user.</p>
 
           {!overview ? (
             <p className="hint compact" style={{ marginTop: "1rem" }}>Loading overview…</p>
@@ -226,6 +230,11 @@ export function AdminPortal({ role }: Props) {
                 <StatTile label="Emails Sent" value={overview.totalEmailsSent} />
                 <StatTile label="Replies" value={overview.totalReplies} />
                 <StatTile label="AI Credits Remaining" value={overview.totalAiCreditsRemaining} sub="platform-wide" />
+                <StatTile
+                  label="Total Platform Spend"
+                  value={`$${(overview.totalAiSpendUsd + overview.totalInfraSpendUsd).toFixed(2)}`}
+                  sub={`$${overview.totalAiSpendUsd.toFixed(2)} AI, $${overview.totalInfraSpendUsd.toFixed(2)} infra (est.)`}
+                />
               </div>
 
               <div className="panel" style={{ marginTop: "1rem", background: "var(--bg-panel)" }}>
@@ -565,7 +574,7 @@ function OverrideCell({
 
 function UserDetailsModal({ user, onClose }: { user: UserState; onClose: () => void }) {
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<"overview" | "keys" | "templates" | "crm" | "logs">("overview");
+  const [activeTab, setActiveTab] = useState<"overview" | "keys" | "templates" | "crm" | "logs" | "cost">("overview");
   const [details, setDetails] = useState<any>(null);
 
   useEffect(() => {
@@ -616,14 +625,14 @@ function UserDetailsModal({ user, onClose }: { user: UserState; onClose: () => v
         ) : (
           <>
             <div style={{ display: "flex", gap: "0.5rem", marginTop: "1rem", borderBottom: "1px solid var(--line)", paddingBottom: "0.5rem" }}>
-              {(["overview", "keys", "templates", "crm", "logs"] as const).map(tab => (
+              {(["overview", "keys", "templates", "crm", "logs", "cost"] as const).map(tab => (
                 <button
                   key={tab}
                   className={`btn small ${activeTab === tab ? "filled" : "ghost"}`}
                   onClick={() => setActiveTab(tab)}
                   style={{ textTransform: "capitalize" }}
                 >
-                  {tab === "crm" ? "Email CRM" : tab}
+                  {tab === "crm" ? "Email CRM" : tab === "cost" ? "AI Cost" : tab}
                 </button>
               ))}
             </div>
@@ -777,6 +786,69 @@ function UserDetailsModal({ user, onClose }: { user: UserState; onClose: () => v
                                   </pre>
                                 )}
                               </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {activeTab === "cost" && (
+                <div style={{ display: "flex", flexDirection: "column", gap: "2rem" }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: "0.75rem" }}>
+                    <StatTile label="Total AI Spend" value={`$${(details.ai_usage_totals.totalCostUsd ?? 0).toFixed(4)}`} sub="lifetime" />
+                    <StatTile label="Total Tokens" value={details.ai_usage_totals.totalTokens ?? 0} sub="lifetime" />
+                    <StatTile label="AI Calls" value={details.ai_usage_totals.callCount ?? 0} sub="lifetime" />
+                  </div>
+
+                  <div>
+                    <h3 style={{ fontSize: "1rem", marginBottom: "0.5rem" }}>Gemini Calls (Recent 200)</h3>
+                    {details.ai_usage_log.length === 0 ? <p className="hint">No AI calls logged yet.</p> : (
+                      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.85rem" }}>
+                        <thead>
+                          <tr style={{ borderBottom: "1px solid var(--line)", textAlign: "left" }}>
+                            <th style={{ padding: "0.5rem" }}>Time</th>
+                            <th style={{ padding: "0.5rem" }}>Call Type</th>
+                            <th style={{ padding: "0.5rem" }}>Tokens (in / out)</th>
+                            <th style={{ padding: "0.5rem" }}>Cost</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {details.ai_usage_log.map((log: any) => (
+                            <tr key={log.id} style={{ borderBottom: "1px solid var(--line)" }}>
+                              <td style={{ padding: "0.5rem", color: "var(--muted)", whiteSpace: "nowrap" }}>{new Date(log.created_at).toLocaleString()}</td>
+                              <td style={{ padding: "0.5rem" }}>{log.call_type}</td>
+                              <td style={{ padding: "0.5rem" }}>{log.prompt_tokens} / {log.completion_tokens}</td>
+                              <td style={{ padding: "0.5rem" }}>${Number(log.cost_usd).toFixed(6)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    )}
+                  </div>
+
+                  <div>
+                    <h3 style={{ fontSize: "1rem", marginBottom: "0.5rem" }}>Auth Emails (Resend, est. cost)</h3>
+                    <p className="hint compact" style={{ marginBottom: "0.5rem" }}>
+                      Signup/login emails only — bulk sends use this user&apos;s own SMTP and cost the platform nothing.
+                    </p>
+                    {details.infra_usage_log.length === 0 ? <p className="hint">No auth emails logged yet.</p> : (
+                      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.85rem" }}>
+                        <thead>
+                          <tr style={{ borderBottom: "1px solid var(--line)", textAlign: "left" }}>
+                            <th style={{ padding: "0.5rem" }}>Time</th>
+                            <th style={{ padding: "0.5rem" }}>Event</th>
+                            <th style={{ padding: "0.5rem" }}>Est. Cost</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {details.infra_usage_log.map((log: any) => (
+                            <tr key={log.id} style={{ borderBottom: "1px solid var(--line)" }}>
+                              <td style={{ padding: "0.5rem", color: "var(--muted)", whiteSpace: "nowrap" }}>{new Date(log.created_at).toLocaleString()}</td>
+                              <td style={{ padding: "0.5rem", textTransform: "capitalize" }}>{log.event_type.replace(/_/g, " ")}</td>
+                              <td style={{ padding: "0.5rem" }}>${Number(log.cost_usd).toFixed(4)}</td>
                             </tr>
                           ))}
                         </tbody>

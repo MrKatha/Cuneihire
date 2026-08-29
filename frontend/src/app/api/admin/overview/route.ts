@@ -9,9 +9,9 @@ const JOB_TYPES = ["scraper", "automail", "reply_poll"] as const;
 const DAY_MS = 24 * 60 * 60 * 1000;
 const WEEK_MS = 7 * DAY_MS;
 
-// Platform-wide "overall status" summary (2026-08-29, admin portal task) — a live snapshot only, no
-// AI-credit spend ledger exists to build usage-over-time from (confirmed with the operator, out of scope
-// this pass). Every query here is a simple count/limit(1), fine at the app's current scale.
+// Platform-wide "overall status" summary (2026-08-29, admin portal task). Was a live snapshot only with no
+// spend ledger to build usage-over-time from — that gap is now closed (2026-08-29, cost-metering task):
+// automailsend_ai_usage_log/automailsend_infra_usage_log below are real row-per-call ledgers.
 export async function GET(req: Request) {
   if (!(await verifyAdmin(req))) return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
 
@@ -27,6 +27,8 @@ export async function GET(req: Request) {
       sentCountRes,
       repliesCountRes,
       recentFailuresRes,
+      aiSpendRes,
+      infraSpendRes,
       ...lastRunRes
     ] = await Promise.all([
       supabaseAdmin.auth.admin.listUsers(),
@@ -40,6 +42,8 @@ export async function GET(req: Request) {
         .select("id", { count: "exact", head: true })
         .in("status", ["error", "failed"])
         .gte("created_at", sinceDay),
+      supabaseAdmin.from("automailsend_ai_usage_log").select("cost_usd"),
+      supabaseAdmin.from("automailsend_infra_usage_log").select("cost_usd"),
       ...JOB_TYPES.map((jobType) =>
         supabaseAdmin
           .from("automailsend_execution_logs")
@@ -67,6 +71,9 @@ export async function GET(req: Request) {
       return { jobType, lastRunAt: row?.created_at ?? null, lastStatus: row?.status ?? null };
     });
 
+    const totalAiSpendUsd = (aiSpendRes.data || []).reduce((sum, r) => sum + (r.cost_usd ?? 0), 0);
+    const totalInfraSpendUsd = (infraSpendRes.data || []).reduce((sum, r) => sum + (r.cost_usd ?? 0), 0);
+
     return NextResponse.json({
       success: true,
       data: {
@@ -80,6 +87,8 @@ export async function GET(req: Request) {
         totalEmailsSent: sentCountRes.count ?? 0,
         totalReplies: repliesCountRes.count ?? 0,
         totalAiCreditsRemaining: totalAiCredits,
+        totalAiSpendUsd,
+        totalInfraSpendUsd,
         recentFailures24h: recentFailuresRes.count ?? 0,
         workerHealth,
       },

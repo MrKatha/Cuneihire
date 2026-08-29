@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Eye, EyeOff, ArrowLeft } from "lucide-react";
 import HexMark from "@/components/ui/HexMark";
+import { logInfraUsage } from "@/lib/logInfraUsage";
 
 type Method = "password" | "magic" | "code";
 
@@ -75,6 +76,7 @@ export default function LoginPage() {
     if (!error) {
       setResendSent(true);
       startCooldown(setResendCooldown);
+      logInfraUsage(email, "resend_confirmation");
     }
   }
 
@@ -94,6 +96,7 @@ export default function LoginPage() {
     } else {
       setOtpSent(true);
       startCooldown(setOtpCooldown);
+      logInfraUsage(otpEmail, method === "magic" ? "magic_link" : "otp_code");
     }
   }
 
