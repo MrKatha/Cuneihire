@@ -2,6 +2,15 @@
 
 Newest on top. Terse bullets only — done / in-progress / locked decisions / open items. Update every phase.
 
+- **2026-08-31 — DONE: "is this even a job post?" gate — closes a real false-positive bug the operator hit
+  live** (a WhatsApp-automation-tool ad got saved as a contact for matching most of a role's search
+  keywords). Root cause: every relevance check (`computeAlgorithmicMatch`/`scoreJobMatch`/exclude-keywords)
+  only runs when `roleHasCriteria(roleDef)` — a role with just plain search keywords (no exclude/AI-
+  instructions/structured fields) had zero relevance filtering at all. New `looksLikeJobPost()` in
+  `matchAlgorithm.service.js` (pure regex, zero AI cost) runs unconditionally in `scraper.worker.js` before
+  the criteria-gated block — rejects only when a clear promo signal is present with no hiring signal to
+  counterbalance it. Verified against 7 hand-picked cases incl. the exact reported bug text. See
+  docs/architecture.md's "Follow-up (2026-08-31)" under Job matching — JAMS.
 - **2026-08-31 — DONE (code): Lemon Squeezy real subscriptions (foundation-hardening Workstream B). BLOCKED
   on operator provisioning before it's actually live.** Operator: "the payment matters, the subscriptions,
   how we are gonna cut the subscription" — real recurring billing was entirely missing (credits were 100%

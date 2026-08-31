@@ -302,6 +302,43 @@ function computeAlgorithmicMatch(contextText, role) {
   return { score, reasoning: reasoning.slice(0, 200), signals };
 }
 
+// "Is this even a job post?" gate (2026-08-31, operator-reported bug — a WhatsApp-automation-tool ad got
+// treated as a job post because it happened to contain most of a role's search keywords). Root cause: every
+// check above this point in the file only ever runs when roleHasCriteria(roleDef) is true (see
+// scraper.worker.js's saveContacts) — a role with only plain search keywords set (no exclude_keywords, no
+// ai_instructions, no structured fields) has NOTHING checking "is this actually a hiring post" at all, so a
+// promotional post that happens to match the search keywords sails straight through as a contact. This
+// function is deliberately UNCONDITIONAL — called for every group regardless of role criteria (see
+// scraper.worker.js) — so it closes that gap for every role, not just ones that opted into other filters.
+// Zero AI cost, same "regex/substring, hand-verifiable" convention as the rest of this file.
+//
+// Deliberately conservative in the direction of "don't lose a real lead": only rejects when a clear
+// promotional/self-marketing signal is present AND no hiring-post signal counterbalances it — a real job
+// post that happens to mention a product/tool in passing (common — "we use Salesforce") still has plenty of
+// its own hiring vocabulary (employment type, "we're hiring", "apply", etc.) to survive this check.
+const PROMO_SIGNAL_RE = /\b(check out my|i built|i created|i'?m launching|introducing my|excited to launch|join my waitlist|sign up now|link in bio|dm me for|dm me to|message me to (?:get|buy|grab)|swipe up|for sale|buy now|discount code|% off|course on|template for|automation tool|saas for|my new (?:app|tool|product)|grab your|free trial of my|join my community|download now|book a demo|book a call with me)\b/i;
+const HIRING_SIGNAL_RE = /\b(we'?re hiring|we are hiring|now hiring|hiring for|job opening|open position|open role|join our team|looking for an?\b.{0,40}\b(engineer|developer|manager|designer|specialist|analyst|lead|intern|associate|coordinator|consultant)|we'?re looking for|we are looking for|seeking an?\b|send (?:your|us your) (?:resume|cv)|apply (?:now|at|here|via|by)|years of experience|responsibilities:|requirements:|qualifications:|job description)\b/i;
+// Reused from EMPLOYMENT_TYPE_PATTERNS above — any one of those 4 already-defined patterns also counts as a
+// hiring-post signal here, without duplicating the regex.
+const EMPLOYMENT_TYPE_RE_ANY = new RegExp(Object.values(EMPLOYMENT_TYPE_PATTERNS).map((re) => re.source).join("|"), "i");
+
+function looksLikeJobPost(text) {
+  const t = (text || "").trim();
+  if (!t) return { verdict: "unknown", reasoning: "No post text captured — can't judge." };
+
+  const hasPromoSignal = PROMO_SIGNAL_RE.test(t);
+  if (!hasPromoSignal) return { verdict: "job_or_unknown" };
+
+  const hasHiringSignal = HIRING_SIGNAL_RE.test(t) || EMPLOYMENT_TYPE_RE_ANY.test(t);
+  if (hasHiringSignal) return { verdict: "job_or_unknown" };
+
+  const promoMatch = t.match(PROMO_SIGNAL_RE);
+  return {
+    verdict: "not_a_job",
+    reasoning: `Reads like a product/service promotion ("${promoMatch[0]}"), not a hiring post — no job-posting language found alongside it.`,
+  };
+}
+
 // Pure escalation policy — no I/O, easy to hand-verify against a truth table. hasFreshMatchKeywords
 // (2026-08-28 follow-up) is computed by the caller (scraper.worker.js, which already imports both this
 // service and ai.service.js's matchKeywordsAreStale) — kept out of this file to preserve its "pure, no DB,
@@ -325,4 +362,5 @@ module.exports = {
   roleHasAlgorithmicCriteria,
   computeAlgorithmicMatch,
   shouldEscalateToAI,
+  looksLikeJobPost,
 };

@@ -153,6 +153,26 @@ values counts as a match, not all of them. Existing single selections were backf
 on migration, not lost. `other_notes` was removed from the Roles UI the same day — confirmed it never
 reached the AI matcher or resume composer, so it wasn't serving any purpose; field/column kept, unread.
 
+### Follow-up (2026-08-31) — "is this even a job post?" gate, closes a real false-positive class
+Operator-reported bug: a WhatsApp-automation-tool ad got saved as a contact because it happened to contain
+most of a role's search keywords. Root cause: every check above (`computeAlgorithmicMatch`, `scoreJobMatch`,
+the exclude-keyword/AI-instructions filters) only ever runs when `roleHasCriteria(roleDef)` is true — a role
+with only plain search keywords (the common case for a new role, no exclude keywords/AI instructions/
+structured fields set yet) had **nothing** checking "is this actually a hiring post" at all; LinkedIn's own
+keyword search surfaces any post containing the terms, ads and promos included. Fixed with
+`matchAlgorithm.service.js`'s new `looksLikeJobPost(text)` — pure regex, zero AI cost, deliberately
+**unconditional** (called in `scraper.worker.js`'s `saveContacts` right after the dedup check, before the
+`roleHasCriteria`-gated block, so it applies to every role regardless of what other criteria are set).
+Conservative by design: only rejects when a clear promotional/self-marketing signal (`PROMO_SIGNAL_RE` —
+"check out my," "DM me for," "template for," etc.) is present **and** no hiring-post signal
+(`HIRING_SIGNAL_RE`, or any of the existing `EMPLOYMENT_TYPE_PATTERNS`) counterbalances it — a real job post
+that mentions a product/tool in passing still has its own hiring vocabulary to survive the check. A rejected
+post is skipped before the job-post upsert even happens (no DB row, no credit, no send) and logged at INFO.
+Verified with 7 hand-picked cases including the exact reported bug text — correctly rejects it and a
+template-promo post, correctly passes 3 genuine job-post variants (including one that mentions a tool) and a
+neutral unrelated post (this function only catches clear *promotional* pitches, not all irrelevant content —
+generic relevance is still the existing role-criteria scoring's job, unchanged).
+
 ## JAMS consolidation — the unified lifecycle hub (2026-08-18)
 Operator's target flow is: connect SMTP → scraper (plain LinkedIn API calls + parsing, no AI) finds HR
 contacts against a role's keywords → AI personalizes and sends the outreach email → the whole thing gets

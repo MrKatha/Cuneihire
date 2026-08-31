@@ -3,7 +3,7 @@ const axios = require("axios");
 const { supabase } = require("../config/supabase");
 const { extractContactsWithAttribution, extractInitialContacts, extractPaginatedContacts } = require("../services/extraction.service");
 const { scoreJobMatch, generateMatchKeywords, matchKeywordsAreStale } = require("../services/ai.service");
-const { roleHasCriteria, computeAlgorithmicMatch, shouldEscalateToAI } = require("../services/matchAlgorithm.service");
+const { roleHasCriteria, computeAlgorithmicMatch, shouldEscalateToAI, looksLikeJobPost } = require("../services/matchAlgorithm.service");
 const { ExecutionLogger } = require("../lib/logger");
 const { getGlobalSettings } = require("../lib/globalSettings");
 const { spendAiCredit } = require("../lib/aiCredits");
@@ -199,6 +199,19 @@ async function processJobLogic(job, logger, mappings, aiEnabled, aiCredits, aiTe
       const newEmails = group.emails.filter(e => !allEmails.has(e.toLowerCase()));
       const newPhones = group.phones.filter(p => !allPhones.has(p));
       if (newEmails.length === 0 && newPhones.length === 0) continue;
+
+      // "Is this even a job post?" gate (2026-08-31, operator-reported bug — a WhatsApp-automation-tool ad
+      // got saved as a contact because it happened to match a role's search keywords). Deliberately
+      // UNCONDITIONAL — every other relevance check below is gated on roleHasCriteria(roleDef), so a role
+      // with only plain search keywords (no exclude_keywords/ai_instructions/structured fields) had
+      // NOTHING checking this before. Runs before the job-post upsert/scoring below so a rejected post
+      // never costs a DB row, a credit, or a send — same "reject before spending anything" ordering as the
+      // dedup check just above. Zero AI cost either way.
+      const jobPostCheck = looksLikeJobPost(group.contextText);
+      if (jobPostCheck.verdict === "not_a_job") {
+        await logger.append("INFO", `Skipped a non-job post for role '${roleToAssign}': ${jobPostCheck.reasoning}`);
+        continue;
+      }
 
       // Resolve + score the job post only once we know there's actually something new to potentially
       // insert. This DOES mean a post whose every contact was already captured before AI matching
