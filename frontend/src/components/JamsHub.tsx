@@ -27,6 +27,7 @@ type Props = {
   sentTodayCount: number;
   globalMaxDailyLimit: number;
   aiCredits: number;
+  appCredits: number;
   sentLog: SentRecord[];
   onOpenQuickSend: () => void;
   // JamsTab's own props, passed straight through to the "Emails" sub-tab.
@@ -56,6 +57,7 @@ export function JamsHub({
   sentTodayCount,
   globalMaxDailyLimit,
   aiCredits,
+  appCredits,
   sentLog,
   onOpenQuickSend,
   recipients,
@@ -101,6 +103,7 @@ export function JamsHub({
             sentTodayCount={sentTodayCount}
             globalMaxDailyLimit={globalMaxDailyLimit}
             aiCredits={aiCredits}
+            appCredits={appCredits}
             recipients={recipients}
             sentLog={sentLog}
             roleDefs={roleDefs}

@@ -46,6 +46,9 @@ export type PersistedState = {
   ai: AiConfig;
   // Admin-granted, read-only from here. Set via the Admin Portal, never by the user themselves.
   aiCredits: number;
+  // App credits (2026-08-31, MVP push) — the second currency, spent on EVERY send (not just AI-touched
+  // ones). Admin-granted, read-only from here, same as aiCredits.
+  appCredits: number;
   // Manual per-user overrides (2026-08-25) — the first lever toward real plan tiers, admin-set via
   // AdminPortal.tsx, read-only from here. null means "no override, behave exactly like every other
   // account" — see supabase_setup.sql's section for the full reasoning.
@@ -90,6 +93,7 @@ export function defaultState(): PersistedState {
       matchStrictness: 0,
     },
     aiCredits: 0,
+    appCredits: 0,
     maxKeywords: null,
     minFetchIntervalOverride: null,
     // Loaded/saved separately via loadCandidateProfile/saveCandidateProfile (its own table, own section
@@ -183,6 +187,7 @@ export async function loadState(userId: string): Promise<PersistedState> {
       matchStrictness: appState.ai_match_strictness || 0,
     };
     state.aiCredits = appState.ai_credits ?? 0;
+    state.appCredits = appState.app_credits ?? 0;
     state.maxKeywords = appState.max_keywords ?? null;
     state.minFetchIntervalOverride = appState.min_fetch_interval_override ?? null;
     // profile is no longer read from app_state — see loadCandidateProfile below. The old candidate_*
@@ -218,6 +223,8 @@ export async function loadState(userId: string): Promise<PersistedState> {
       hasReplied: !!r.has_replied,
       repliedAt: r.replied_at || undefined,
       replyCount: r.reply_count || 0,
+      lastSentAt: r.last_sent_at || undefined,
+      followUpCount: r.follow_up_count || 0,
     }));
   }
 
@@ -351,6 +358,10 @@ function mapRoleDefRow(d: any): RoleDef {
     scratchResumeProfileId: d.scratch_resume_profile_id ?? null,
     emailSendMode: (d.email_send_mode as RoleDef["emailSendMode"]) || "manual",
     selectedTemplateId: d.selected_template_id ?? null,
+    followUpIntervalDays: d.follow_up_interval_days ?? null,
+    followUpTemplate1Id: d.follow_up_template_1_id ?? null,
+    followUpTemplate2Id: d.follow_up_template_2_id ?? null,
+    followUpTemplate3Id: d.follow_up_template_3_id ?? null,
   };
 }
 
@@ -417,6 +428,10 @@ export async function saveRoleDef(
     if (def.scratchResumeProfileId !== undefined) payload.scratch_resume_profile_id = def.scratchResumeProfileId;
     if (def.emailSendMode !== undefined) payload.email_send_mode = def.emailSendMode;
     if (def.selectedTemplateId !== undefined) payload.selected_template_id = def.selectedTemplateId;
+    if (def.followUpIntervalDays !== undefined) payload.follow_up_interval_days = def.followUpIntervalDays;
+    if (def.followUpTemplate1Id !== undefined) payload.follow_up_template_1_id = def.followUpTemplate1Id;
+    if (def.followUpTemplate2Id !== undefined) payload.follow_up_template_2_id = def.followUpTemplate2Id;
+    if (def.followUpTemplate3Id !== undefined) payload.follow_up_template_3_id = def.followUpTemplate3Id;
 
     const { data, error } = await supabase
       .from("automailsend_role_defs")
@@ -783,11 +798,18 @@ export async function addSentLog(
     sent_at: record.sentAt,
     template_label: record.templateLabel || null,
     resume_label: record.resumeLabel || null,
+    send_stage: "initial",
   });
 
-  // Also update the recipient's status so the UI reflects it immediately
+  // Also update the recipient's status so the UI reflects it immediately. Follow-up scheduling fields only
+  // set on an actual send — a failed/skipped Quick Send starts no follow-up clock (2026-08-31).
+  const recipientUpdate: Record<string, unknown> = { status: record.status };
+  if (record.status === "sent") {
+    recipientUpdate.last_sent_at = record.sentAt;
+    recipientUpdate.next_follow_up_at = record.nextFollowUpAt ?? null;
+  }
   await supabase.from("automailsend_recipients")
-    .update({ status: record.status })
+    .update(recipientUpdate)
     .eq("user_id", userId)
     .eq("email", record.email);
 }

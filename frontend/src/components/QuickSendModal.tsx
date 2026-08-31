@@ -6,7 +6,7 @@ import toast from "react-hot-toast";
 import { supabase } from "@/lib/supabase";
 import { addSentLog } from "@/lib/storage";
 import { applyPlaceholders, hasUnresolvedPlaceholders, TEMPLATE_VARIABLES } from "@/lib/placeholders";
-import { resolveRoleAttachments, describeFiles } from "@/lib/emailResolve";
+import { resolveRoleAttachments, describeFiles, computeNextFollowUpAt } from "@/lib/emailResolve";
 import {
   roleLabel,
   type AiConfig,
@@ -220,9 +220,15 @@ export function QuickSendModal({
         });
         if (insertError) throw insertError;
 
+        // 2026-08-31: this route now requires a real session (app-credit gating) — same Bearer pattern
+        // already used for /api/ai-enhance above.
+        const { data: { session } } = await supabase.auth.getSession();
         const sendRes = await fetch("/api/send", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            ...(session ? { Authorization: `Bearer ${session.access_token}` } : {}),
+          },
           body: JSON.stringify({
             fromName: account.fromName,
             email: account.email,
@@ -249,6 +255,7 @@ export function QuickSendModal({
           sentAt: new Date().toISOString(),
           templateLabel: composeMode === "template" ? selectedTemplate?.label : composeMode === "ai" ? "AI-written" : "Custom",
           resumeLabel: describeFiles(roleFiles),
+          nextFollowUpAt: computeNextFollowUpAt(roleDef),
         });
 
         if (sendRes.ok && sendData.success) {

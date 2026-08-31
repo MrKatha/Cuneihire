@@ -164,13 +164,14 @@ export function RoleTemplates({
     <div className="panel-body">
       <p className="hint compact" style={{ display: "flex", alignItems: "center", gap: "0.3rem" }}>
         Manage roles and keywords on <strong>Roles</strong>, attachments on <strong>Resumes</strong>,
-        send mode on this tab&apos;s <strong>Configuration</strong> sub-tab · 8 variables available
+        send mode on this tab&apos;s <strong>Configuration</strong> sub-tab · 10 variables available
         <HelpTooltip
           title="Template Variables"
           content={
             <>
               <p><strong>About the job</strong> (best-effort, blank if unknown): {"{{title}}"} {"{{name}}"} {"{{email}}"}</p>
               <p><strong>About you</strong> (set on the Profile page): {"{{candidate_name}}"} {"{{candidate_email}}"} {"{{candidate_phone}}"} {"{{candidate_portfolio}}"} {"{{candidate_resume_link}}"}</p>
+              <p><strong>Follow-ups only</strong> (blank/1 outside a follow-up): {"{{last_sent_date}}"} {"{{follow_up_number}}"}</p>
               <p>An email is never sent with one of these left unfilled — it&apos;s blocked instead.</p>
             </>
           }

@@ -37,3 +37,11 @@ export function describeFiles(files: Attachment[]): string | undefined {
   if (!files || files.length === 0) return undefined;
   return files.map((f) => f.name).join(", ");
 }
+
+// Automated follow-ups (2026-08-31) — the timestamp a recipient becomes eligible for its next follow-up,
+// computed once at send time. null when the role has no interval set (follow-ups off for this role). KEEP
+// IN SYNC with backend/src/lib/emailResolve.js's identical twin.
+export function computeNextFollowUpAt(roleDef: RoleDef | null): string | null {
+  const days = roleDef?.followUpIntervalDays;
+  return days && days > 0 ? new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString() : null;
+}

@@ -5,6 +5,7 @@ const { runAutomailJobs } = require("./workers/automail.worker");
 
 const { processBatchSendJob } = require("./workers/batchSend.worker");
 const { processReplyPollJob } = require("./workers/replyPoll.worker");
+const { runFollowUpJobs } = require("./workers/followUp.worker");
 const { getGlobalSettings } = require("./lib/globalSettings");
 
 const lastQueuedMap = new Map();
@@ -95,6 +96,24 @@ function startScheduler() {
       isReplyPollRunning = false;
     }
   }, replyPollTickSec * 1000);
+
+  // Automated follow-ups (2026-08-31, MVP push) — 5th independent loop, same shape as the 4 above. 300s
+  // default (day-granularity feature, no need for tight polling like automail's 10s).
+  const followUpTickSec = process.env.FOLLOWUP_WORKER_INTERVAL_SEC ? parseInt(process.env.FOLLOWUP_WORKER_INTERVAL_SEC, 10) : 300;
+  console.log(pc.green(`🚀 Starting Follow-Up Worker (checking every ${followUpTickSec} seconds)...`));
+  let isFollowUpRunning = false;
+  setInterval(async () => {
+    if (isFollowUpRunning) return;
+    isFollowUpRunning = true;
+    console.log(pc.dim(`[FollowUp Worker] Checking for recipients due a follow-up...`));
+    try {
+      await runFollowUpJobs(supabase);
+    } catch (err) {
+      console.error(pc.red(`[Scheduler] Follow-up worker error: ${err.message}`));
+    } finally {
+      isFollowUpRunning = false;
+    }
+  }, followUpTickSec * 1000);
 
   setInterval(async () => {
     // or just log it so the user knows it's checking.

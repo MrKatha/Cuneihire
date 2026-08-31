@@ -178,6 +178,15 @@ export type RoleDef = {
   // Only meaningful when emailSendMode === "manual". A stale/deleted id is treated as "none selected"
   // (unknown isn't a fail) rather than guessed — see automail.worker.js's resolveEmailForRecipient.
   selectedTemplateId: string | null;
+  // Automated follow-ups (2026-08-31, MVP push) — null/unset means follow-ups are off for this role, same
+  // "nullable means unset" idiom as selectedTemplateId/resumeId. A positive integer = days between each of
+  // up to 3 follow-ups (see followUp.worker.js). Each followUpTemplateNId is independently nullable: null =
+  // AI writes that slot (the default), set = that exact template is sent verbatim, no AI involved — same
+  // "manual" semantics as emailSendMode.
+  followUpIntervalDays: number | null;
+  followUpTemplate1Id: string | null;
+  followUpTemplate2Id: string | null;
+  followUpTemplate3Id: string | null;
 };
 
 export const SALARY_CURRENCIES = ["USD", "EUR", "GBP", "PKR", "INR", "AED", "CAD", "AUD"] as const;
@@ -213,6 +222,11 @@ export type Recipient = {
   hasReplied?: boolean;
   repliedAt?: string;
   replyCount?: number;
+  // Automated follow-ups (2026-08-31) — set by the backend's followUp.worker.js (and on the initial send by
+  // automail.worker.js/batchSend.worker.js/storage.ts's addSentLog). lastSentAt is the most recent send
+  // (initial or follow-up) to this contact; followUpCount caps at 3 — see docs/architecture.md.
+  lastSentAt?: string;
+  followUpCount?: number;
 };
 
 export type Attachment = {
@@ -457,6 +471,9 @@ export type SentRecord = {
   // draft (no library template involved at all).
   templateLabel?: string;
   resumeLabel?: string;
+  // Automated follow-ups (2026-08-31) — undefined when the role has no follow_up_interval_days set (follow-
+  // ups off); addSentLog uses this to schedule the recipient's next_follow_up_at alongside logging the send.
+  nextFollowUpAt?: string | null;
 };
 
 // An inbound reply the backend's IMAP poller matched back to a previously-sent email (2026-08-19) —

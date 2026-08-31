@@ -5,8 +5,9 @@ const { decryptPassword } = require("../lib/crypto");
 const { ExecutionLogger } = require("../lib/logger");
 const { chooseTemplateForJob, generateAiPersonalizedEmail, applyPlaceholders, hasUnresolvedPlaceholders } = require("../services/ai.service");
 const { loadAccountPool, buildTransporter } = require("../lib/smtpPool");
-const { resolveRoleAttachments, describeFiles } = require("../lib/emailResolve");
+const { resolveRoleAttachments, describeFiles, computeNextFollowUpAt } = require("../lib/emailResolve");
 const { spendAiCredit } = require("../lib/aiCredits");
+const { spendAppCredit } = require("../lib/appCredits");
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -54,6 +55,7 @@ async function runAutomailJobs(supabase) {
       // means off. Posts with no score yet (match_score null) are never gated — unknown isn't a fail.
       const matchStrictness = user.ai_match_strictness || 0;
       let strictnessSkippedLogged = false;
+      let appCreditsSkippedLogged = false;
       // Structured, user-controlled contact info backing the {{candidate_*}} template variables (see
       // ai.service.js's applyPlaceholders/buildUserMessage). Moved off app_state to its own table
       // (2026-08-19, frontend's automailsend_candidate_profiles — the permanent knowledge base a role's
@@ -194,7 +196,7 @@ async function runAutomailJobs(supabase) {
 
       const { data: roleDefs } = await supabase
         .from("automailsend_role_defs")
-        .select("key, email_send_mode, selected_template_id, resume_id")
+        .select("key, email_send_mode, selected_template_id, resume_id, follow_up_interval_days, follow_up_template_1_id, follow_up_template_2_id, follow_up_template_3_id")
         .eq("user_id", userId);
 
       const templatesByRole = {};
@@ -224,6 +226,19 @@ async function runAutomailJobs(supabase) {
           if (!strictnessSkippedLogged) {
             await logger.append("INFO", `Skipping recipient(s) below your match strictness threshold (${matchStrictness}) for the rest of this run.`);
             strictnessSkippedLogged = true;
+          }
+          continue;
+        }
+
+        // App credits (2026-08-31, MVP push) — checked before ANY template/AI/send work, since every send
+        // costs one regardless of mode. Log once (not per recipient, matching the match-strictness pattern
+        // above) then keep skipping silently. No status change, no sent_log row — a transient, admin-
+        // recoverable shortage should never permanently lose a recipient; it's retried automatically once
+        // an admin tops up credits.
+        if (!(user.app_credits > 0)) {
+          if (!appCreditsSkippedLogged) {
+            await logger.append("WARN", `Out of app credits — skipping remaining recipient(s) this run. Ask an admin to grant more.`);
+            appCreditsSkippedLogged = true;
           }
           continue;
         }
@@ -430,10 +445,21 @@ async function runAutomailJobs(supabase) {
           account.remaining -= 1;
         }
 
+        // App credits (2026-08-31) — spent only after a successful send, alongside the follow-up scheduling
+        // fields (next_follow_up_at/last_sent_at). A failed send costs nothing and starts no follow-up
+        // clock — same "spend after success only" rule as ai_credits.
+        const recipientUpdate = { status };
+        if (status === "sent") {
+          const spentApp = await spendAppCredit(supabase, userId);
+          user.app_credits = spentApp ? user.app_credits - 1 : 0;
+          recipientUpdate.last_sent_at = new Date().toISOString();
+          recipientUpdate.next_follow_up_at = computeNextFollowUpAt(roleDef);
+        }
+
         // Update recipient status
         await supabase
           .from("automailsend_recipients")
-          .update({ status })
+          .update(recipientUpdate)
           .eq("user_id", userId)
           .eq("email", recipient.email);
 
@@ -454,6 +480,7 @@ async function runAutomailJobs(supabase) {
             template_label: templateLabelForLog,
             resume_label: resumeLabelForLog,
             message_id: messageId,
+            send_stage: "initial",
           });
 
         if (delaySec > 0) {

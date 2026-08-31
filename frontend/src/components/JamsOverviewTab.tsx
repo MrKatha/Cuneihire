@@ -18,6 +18,7 @@ type Props = {
   sentTodayCount: number;
   globalMaxDailyLimit: number;
   aiCredits: number;
+  appCredits: number;
   recipients: Recipient[];
   sentLog: SentRecord[];
   roleDefs: RoleDef[];
@@ -49,6 +50,7 @@ export function JamsOverviewTab({
   sentTodayCount,
   globalMaxDailyLimit,
   aiCredits,
+  appCredits,
   recipients,
   sentLog,
   roleDefs,
@@ -107,6 +109,7 @@ export function JamsOverviewTab({
         <StatTile label="Total contacts" value={recipients.length} />
         <StatTile label="Total sent" value={totalSent} />
         <StatTile label="Replies" value={totalReplied} sub={totalSent > 0 ? `${replyRatePct}% reply rate` : undefined} />
+        <StatTile label="App credits" value={appCredits} sub="remaining — every send uses one" />
         <StatTile label="AI credits" value={aiCredits} sub="remaining" />
       </div>
 

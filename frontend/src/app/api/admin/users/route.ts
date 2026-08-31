@@ -37,6 +37,7 @@ export async function GET(req: Request) {
           auto_fetch: null,
           automail: null,
           ai_credits: 0,
+          app_credits: 0,
           max_keywords: null,
           min_fetch_interval_override: null,
           ...state,
@@ -60,7 +61,7 @@ export async function POST(req: Request) {
   if (!(await verifyAdmin(req))) return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
 
   try {
-    const { user_id, is_blocked, allowed_products, ai_credits, ats_ai_credits, max_keywords, min_fetch_interval_override } = await req.json();
+    const { user_id, is_blocked, allowed_products, ai_credits, app_credits, ats_ai_credits, max_keywords, min_fetch_interval_override } = await req.json();
     if (!user_id) throw new Error("user_id is required");
 
     const updateData: any = {};
@@ -68,6 +69,8 @@ export async function POST(req: Request) {
     if (allowed_products !== undefined) updateData.allowed_products = allowed_products;
     // Platform-managed AI credits (2026-08-18) — admin-granted only, no self-serve purchase yet.
     if (ai_credits !== undefined) updateData.ai_credits = ai_credits;
+    // App credits (2026-08-31) — the second currency, spent on every send regardless of AI use.
+    if (app_credits !== undefined) updateData.app_credits = app_credits;
     // Manual per-user plan overrides (2026-08-25) — null is a valid, meaningful value here ("clear the
     // override, back to default"), distinct from undefined ("field not sent, don't touch it") — both
     // pass through `!== undefined` correctly since JSON.parse preserves an explicit null.

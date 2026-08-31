@@ -12,6 +12,9 @@ type UserState = {
   automail: any;
   // Platform-managed AI credits (2026-08-18) — admin-granted only, no self-serve purchase yet.
   ai_credits: number;
+  // App credits (2026-08-31, MVP push) — the second currency, spent on EVERY send (not just AI-touched
+  // ones). Gates every send path; ai_credits only gates AI-touched ones.
+  app_credits: number;
   // Recruiter portal (2026-08-19) — null means this user hasn't activated recruiter mode, distinct from
   // a recruiter with 0 credits. See automailsend_recruiter_profiles.
   ats_ai_credits: number | null;
@@ -42,6 +45,8 @@ type OverviewData = {
   totalEmailsSent: number;
   totalReplies: number;
   totalAiCreditsRemaining: number;
+  // App credits (2026-08-31) — the second currency, platform-wide remaining balance.
+  totalAppCreditsRemaining: number;
   // Cost metering (2026-08-29) — real ledgers now (automailsend_ai_usage_log/automailsend_infra_usage_log),
   // not derived from the credit-balance field above.
   totalAiSpendUsd: number;
@@ -229,6 +234,7 @@ export function AdminPortal({ role }: Props) {
                 <StatTile label="Total Leads" value={overview.totalLeads} />
                 <StatTile label="Emails Sent" value={overview.totalEmailsSent} />
                 <StatTile label="Replies" value={overview.totalReplies} />
+                <StatTile label="App Credits Remaining" value={overview.totalAppCreditsRemaining} sub="platform-wide" />
                 <StatTile label="AI Credits Remaining" value={overview.totalAiCreditsRemaining} sub="platform-wide" />
                 <StatTile
                   label="Total Platform Spend"
@@ -328,6 +334,7 @@ export function AdminPortal({ role }: Props) {
                   <th style={{ padding: "0.75rem 0.5rem" }}>User ID</th>
                   <th style={{ padding: "0.75rem 0.5rem" }}>Joined</th>
                   <th style={{ padding: "0.75rem 0.5rem" }}>Status</th>
+                  <th style={{ padding: "0.75rem 0.5rem" }}>App Credits</th>
                   <th style={{ padding: "0.75rem 0.5rem" }}>AI Credits</th>
                   <th style={{ padding: "0.75rem 0.5rem" }}>ATS Credits</th>
                   <th style={{ padding: "0.75rem 0.5rem" }}>Max Keywords</th>
@@ -347,6 +354,14 @@ export function AdminPortal({ role }: Props) {
                       ) : (
                         <span className="badge ok">Active</span>
                       )}
+                    </td>
+                    <td style={{ padding: "0.75rem 0.5rem" }}>
+                      <CreditsCell
+                        userId={u.user_id}
+                        field="app_credits"
+                        credits={u.app_credits ?? 0}
+                        onSaved={(userId, credits) => setUsers(users.map(x => x.user_id === userId ? { ...x, app_credits: credits } : x))}
+                      />
                     </td>
                     <td style={{ padding: "0.75rem 0.5rem" }}>
                       <CreditsCell
@@ -431,7 +446,7 @@ function StatTile({ label, value, sub }: { label: string; value: React.ReactNode
 // self-serve purchase flow exists yet). One small numeric input + "Set" per row, same table-row pattern
 // as the Block/Unblock action next to it. `field` (2026-08-19) lets this same cell also drive
 // ats_ai_credits (automailsend_recruiter_profiles) for the ATS Credits column.
-function CreditsCell({ userId, field, credits, onSaved }: { userId: string; field: "ai_credits" | "ats_ai_credits"; credits: number; onSaved: (userId: string, credits: number) => void }) {
+function CreditsCell({ userId, field, credits, onSaved }: { userId: string; field: "ai_credits" | "ats_ai_credits" | "app_credits"; credits: number; onSaved: (userId: string, credits: number) => void }) {
   const [value, setValue] = useState(String(credits));
   const [saving, setSaving] = useState(false);
 

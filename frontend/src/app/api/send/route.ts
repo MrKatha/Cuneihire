@@ -1,11 +1,26 @@
 import { NextRequest, NextResponse } from "next/server";
 import nodemailer from "nodemailer";
 import { decryptPassword } from "@/lib/crypto";
+import { getAuthedUserId, checkAppCredits, spendAppCredit } from "@/lib/appCredits";
 
 export const runtime = "nodejs";
 
+// Real auth added 2026-08-31 (MVP push) — this route previously had none at all (no Bearer token, no
+// userId), which was fine while nothing here was metered. Now every send costs an app credit, so the
+// caller's identity has to be real, not client-supplied — same getAuthedUserId pattern resume-import/route.ts
+// already uses. QuickSendModal.tsx's fetch call was updated to send a Bearer session token accordingly.
 export async function POST(request: NextRequest) {
   try {
+    const userId = await getAuthedUserId(request);
+    if (!userId) {
+      return NextResponse.json({ success: false, error: "Not signed in." }, { status: 401 });
+    }
+
+    const gate = await checkAppCredits(userId);
+    if (!gate.ok) {
+      return NextResponse.json({ success: false, error: gate.error }, { status: 402 });
+    }
+
     const body = await request.json();
     const { fromName, email, fromEmail, appPassword, host, port, toEmail, subject, content, attachments = [] } = body;
 
@@ -18,7 +33,7 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
-    
+
     let decryptedPassword = appPassword;
     try {
       decryptedPassword = decryptPassword(appPassword);
@@ -52,6 +67,8 @@ export async function POST(request: NextRequest) {
         contentType: a.contentType,
       })),
     });
+
+    await spendAppCredit(userId); // only after sendMail() actually succeeded
 
     return NextResponse.json({
       success: true,

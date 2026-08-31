@@ -3,8 +3,9 @@ import { supabaseAdmin, verifyAdmin } from "@/lib/adminAuth";
 
 // Which worker jobs write to automailsend_execution_logs, and under what details.jobType value — see
 // backend/src/lib/logger.js's ExecutionLogger callers. batchSend.worker.js never writes to this table
-// (despite an SQL comment claiming otherwise), so there's no fourth entry here.
-const JOB_TYPES = ["scraper", "automail", "reply_poll"] as const;
+// (despite an SQL comment claiming otherwise), so there's no entry for it here. follow_up added 2026-08-31
+// (backend/src/workers/followUp.worker.js).
+const JOB_TYPES = ["scraper", "automail", "reply_poll", "follow_up"] as const;
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const WEEK_MS = 7 * DAY_MS;
@@ -32,7 +33,7 @@ export async function GET(req: Request) {
       ...lastRunRes
     ] = await Promise.all([
       supabaseAdmin.auth.admin.listUsers(),
-      supabaseAdmin.from("automailsend_app_state").select("is_blocked, ai_credits"),
+      supabaseAdmin.from("automailsend_app_state").select("is_blocked, ai_credits, app_credits"),
       supabaseAdmin.from("automailsend_recruiter_profiles").select("user_id", { count: "exact", head: true }),
       supabaseAdmin.from("automailsend_recipients").select("id", { count: "exact", head: true }),
       supabaseAdmin.from("automailsend_sent_log").select("id", { count: "exact", head: true }).eq("status", "sent"),
@@ -65,6 +66,7 @@ export async function GET(req: Request) {
     const appStates = appStatesRes.data || [];
     const blockedCount = appStates.filter((s) => s.is_blocked).length;
     const totalAiCredits = appStates.reduce((sum, s) => sum + (s.ai_credits ?? 0), 0);
+    const totalAppCredits = appStates.reduce((sum, s) => sum + (s.app_credits ?? 0), 0);
 
     const workerHealth = JOB_TYPES.map((jobType, i) => {
       const row = lastRunRes[i]?.data?.[0];
@@ -87,6 +89,7 @@ export async function GET(req: Request) {
         totalEmailsSent: sentCountRes.count ?? 0,
         totalReplies: repliesCountRes.count ?? 0,
         totalAiCreditsRemaining: totalAiCredits,
+        totalAppCreditsRemaining: totalAppCredits,
         totalAiSpendUsd,
         totalInfraSpendUsd,
         recentFailures24h: recentFailuresRes.count ?? 0,

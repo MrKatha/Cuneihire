@@ -907,3 +907,55 @@ create index if not exists idx_automailsend_infra_usage_log_email_created
   on public.automailsend_infra_usage_log (email, created_at desc);
 
 alter table public.automailsend_infra_usage_log enable row level security;
+
+-- 2026-08-31 — Dual credit system (app_credits, alongside the existing ai_credits) + automated follow-up
+-- emails. Every send (manual/template/resume/follow-up — not just AI ones) spends one app_credit; an
+-- AI-touched send (ai-write, or an AI-written follow-up) additionally spends one ai_credit, same as today.
+-- See backend/src/lib/appCredits.js, frontend/src/lib/appCredits.ts, backend/src/workers/followUp.worker.js.
+--
+-- app_credits default is deliberately generous (2000, not 20 like ai_credits) — unlike ai_credits (which
+-- only ever gated the opt-in AI features), app_credits will be checked on EVERY send in all 3 paths from
+-- the moment this ships. A low default would immediately block currently-active users' automail/batchSend
+-- loops with no admin action taken yet. 2000 covers the stated MVP scale (3-5 users, 25-50 sends/day) for
+-- ~1-2 months of runway with zero admin intervention required on deploy day; the admin then rightsizes
+-- real per-user balances via the same CreditsCell pattern as ai_credits going forward.
+alter table public.automailsend_app_state
+  add column if not exists app_credits integer not null default 2000;
+
+-- automailsend_role_defs: per-role follow-up cadence + per-slot content override. follow_up_interval_days
+-- is nullable with NO default (null = follow-ups off for this role) rather than a separate boolean flag
+-- column — same "nullable means unset/off" idiom already used by selected_template_id/resume_id elsewhere
+-- in this file, one column instead of two. A positive integer = days between each of the 3 follow-ups. Each
+-- follow_up_template_N_id is independently nullable: null = AI writes that slot (the default per operator
+-- ask), set = that exact template is sent verbatim (placeholders applied), no AI involved, same "manual"
+-- semantics as email_send_mode='manual'. on delete set null mirrors selected_template_id exactly — a
+-- deleted template just reverts that slot to AI-written, never breaks.
+alter table public.automailsend_role_defs
+  add column if not exists follow_up_interval_days integer,
+  add column if not exists follow_up_template_1_id uuid references public.automailsend_templates(id) on delete set null,
+  add column if not exists follow_up_template_2_id uuid references public.automailsend_templates(id) on delete set null,
+  add column if not exists follow_up_template_3_id uuid references public.automailsend_templates(id) on delete set null;
+
+-- automailsend_recipients: cheap "who's due for a follow-up right now" without scanning sent_log.
+-- next_follow_up_at is a precomputed timestamp (set at send time from that role's follow_up_interval_days),
+-- not "last_sent_at + interval" computed per-tick — makes the eligibility query a plain indexed range scan
+-- instead of a join against role_defs on every tick. Set to null once follow_up_count hits 3 (exhausted) or
+-- has_replied flips true (replyPoll.worker.js already sets has_replied; followUp.worker.js's own query also
+-- checks has_replied directly) — so a recipient naturally drops out of eligibility with no extra "done" flag.
+alter table public.automailsend_recipients
+  add column if not exists last_sent_at timestamp with time zone,
+  add column if not exists follow_up_count integer not null default 0,
+  add column if not exists next_follow_up_at timestamp with time zone;
+
+-- automailsend_sent_log: which stage produced this row (2026-08-31) — observability only, mirrors
+-- template_label/resume_label's existing "snapshot of what was true at send time" reasoning. Not used for
+-- any dedup/eligibility logic (that's next_follow_up_at/follow_up_count above).
+alter table public.automailsend_sent_log
+  add column if not exists send_stage text default 'initial'; -- 'initial' | 'follow_up_1' | 'follow_up_2' | 'follow_up_3'
+
+-- This table grows on every eligibility check and will hold thousands of rows even at MVP scale (recipients
+-- accumulate, never pruned) — same reasoning as automailsend_ai_usage_log's explicit index, the only other
+-- precedent for one in this file. Partial index: only rows that could ever match followUp.worker.js's query.
+create index if not exists idx_automailsend_recipients_followup_due
+  on public.automailsend_recipients (user_id, next_follow_up_at)
+  where has_replied = false and status = 'sent';

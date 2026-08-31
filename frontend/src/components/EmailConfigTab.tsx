@@ -43,6 +43,21 @@ export function EmailConfigTab({ recipients, templates, roleDefs, activeRole, on
     onUpdateRoleRules(activeRoleDef.id, patch);
   }
 
+  // Follow-ups (2026-08-31, MVP push) — independent of emailSendMode above: whichever mode sent the
+  // initial email, a follow-up schedule can still run on top of it. null/0 = off for this role (the
+  // default — see followUpIntervalDays's comment in types.ts).
+  function handleFollowUpIntervalChange(raw: string) {
+    if (!activeRoleDef) return;
+    const n = raw.trim() === "" ? null : Math.max(1, parseInt(raw, 10) || 0) || null;
+    onUpdateRoleRules(activeRoleDef.id, { followUpIntervalDays: n });
+  }
+
+  function handleFollowUpSlotChange(slot: 1 | 2 | 3, templateId: string) {
+    if (!activeRoleDef) return;
+    const field = (`followUpTemplate${slot}Id`) as "followUpTemplate1Id" | "followUpTemplate2Id" | "followUpTemplate3Id";
+    onUpdateRoleRules(activeRoleDef.id, { [field]: templateId || null });
+  }
+
   if (roleDefs.length === 0) {
     return (
       <p className="hint">
@@ -98,6 +113,47 @@ export function EmailConfigTab({ recipients, templates, roleDefs, activeRole, on
               from this role&apos;s resume, set on the <strong>Resumes</strong> tab&apos;s Builder
               sub-tab.
             </p>
+          )}
+        </div>
+      )}
+
+      {activeRoleDef && (
+        <div className="template-card single" style={{ marginTop: "1rem" }}>
+          <div className="template-head">
+            <h3>Follow-ups for &quot;{roleLabel(roleDefs, activeRole)}&quot;</h3>
+          </div>
+          <label className="field" style={{ maxWidth: "280px" }}>
+            <span>Wait between follow-ups (days)</span>
+            <input
+              type="number"
+              min={1}
+              placeholder="Off"
+              value={activeRoleDef.followUpIntervalDays ?? ""}
+              onChange={(e) => handleFollowUpIntervalChange(e.target.value)}
+            />
+          </label>
+          <p className="hint compact" style={{ margin: "0.4rem 0 0" }}>
+            Leave blank to turn follow-ups off for this role. When set, up to 3 follow-ups go out on this
+            interval to any recipient who hasn&apos;t replied. Each costs an app credit; an AI-written one
+            also costs an AI credit.
+          </p>
+          {activeRoleDef.followUpIntervalDays != null && (
+            <div style={{ display: "flex", flexDirection: "column", gap: "0.6rem", marginTop: "0.75rem" }}>
+              {([1, 2, 3] as const).map((slot) => {
+                const field = (`followUpTemplate${slot}Id`) as "followUpTemplate1Id" | "followUpTemplate2Id" | "followUpTemplate3Id";
+                return (
+                  <label key={slot} className="field">
+                    <span>Follow-up {slot}</span>
+                    <select value={activeRoleDef[field] ?? ""} onChange={(e) => handleFollowUpSlotChange(slot, e.target.value)}>
+                      <option value="">AI writes this one</option>
+                      {roleTemplates.map((t) => (
+                        <option key={t.id} value={t.id}>{t.label}</option>
+                      ))}
+                    </select>
+                  </label>
+                );
+              })}
+            </div>
           )}
         </div>
       )}

@@ -2,6 +2,21 @@
 
 Newest on top. Terse bullets only — done / in-progress / locked decisions / open items. Update every phase.
 
+- **2026-08-31 — DONE: Dual credit system (app_credits + ai_credits) + automated follow-up emails (MVP
+  push).** Operator is pushing toward a real launch — 3-5 paying users, 25-50 emails/day each. New
+  `app_credits` (default 2000, existing users confirmed migrated to 2000 not 0) is spent on EVERY send
+  (manual/template/resume/follow-up), checked as a pre-flight gate in all 3 send paths
+  (`automail.worker.js`, `batchSend.worker.js`, `frontend/src/app/api/send/route.ts` — which had **zero
+  auth before this**, now uses `getAuthedUserId`). `ai_credits` still spent additionally whenever AI wrote
+  the content. New 5th scheduler loop (`backend/src/workers/followUp.worker.js`, not BullMQ, same
+  `setInterval` pattern as the other 4) sends up to 3 follow-ups per recipient on a real per-role
+  configurable interval (`automailsend_role_defs.follow_up_interval_days`), AI-written by default with an
+  optional per-slot template override (`follow_up_template_{1,2,3}_id`). New template variables
+  `{{last_sent_date}}`/`{{follow_up_number}}` (10 tokens total now). New UI in `EmailConfigTab.tsx` (interval
+  + 3 slot pickers) and both `AdminPortal.tsx`/candidate-side `JamsOverviewTab.tsx` (App Credits stat tile).
+  **Also this session**: researched open-source self-hosted alternatives to Apify for the scraping-layer
+  backlog idea (`86eyt8mwt`) — JobSpy for multi-platform job scraping (no LinkedIn login needed), pattern-
+  guessing + SMTP verification for email discovery (no paid API) — still backlog, not built.
 - **2026-08-29 — DONE (spec only): Candidate pricing tiers (`86eyrp54a`).** New `docs/pricing-tiers.md` —
   Free/Pro/Premium, built entirely from the 4 real existing admin-override levers (ai_credits, max_keywords,
   min_fetch_interval_override, daily_mail_limit), no new schema/code. Two real gaps surfaced and documented,

@@ -62,8 +62,8 @@ thing in the way. `ensureDefaultRoleDefs` is now a thin passthrough to `loadRole
 users land on an empty role list and use `JobsRolesTab.tsx`'s "+ Add title" flow (its existing "No roles yet
 — add one to get started" empty state is now a real, reachable first-run path instead of dead code).
 
-## Template variables (as of 2026-08-17, extended same day)
-Fixed 8-token set, two kinds — see `RoleTemplates.tsx`'s in-app hint for the user-facing version:
+## Template variables (as of 2026-08-17, extended same day; extended again 2026-08-31)
+Fixed 10-token set, three kinds — see `RoleTemplates.tsx`'s in-app hint for the user-facing version:
 - **Job-side** (scraped, best-effort): `{{title}}` (the search keyword that found the contact — recipients
   don't otherwise carry a real job title), `{{name}}` (the LinkedIn post's author when the scraper's
   attribution resolved one), `{{email}}`. Real or absent, never guessed.
@@ -74,6 +74,12 @@ Fixed 8-token set, two kinds — see `RoleTemplates.tsx`'s in-app hint for the u
   below; those old columns are left in place, unused, same precedent as `candidate_info`'s neighbors).
   `candidate_info` (the free-text AI-personalization blurb) is unrelated and untouched, still on
   `automailsend_app_state`.
+- **Follow-up-only** (2026-08-31, see "Dual credit system + automated follow-ups" below): `{{last_sent_date}}`
+  (from `recipient.last_sent_at`, blank on a first-ever send), `{{follow_up_number}}` (from
+  `recipient.follow_up_count + 1`). Resolve safely in any template, not just follow-up ones — a first-touch
+  template using them just renders blank/"1", same tolerance as every other token. Deliberately excluded
+  from Quick Send's "Insert variable" picker (a Quick Send recipient has no follow-up history by definition)
+  but still resolved by `applyPlaceholders` if pasted in manually.
 
 No `{{company}}` token — nothing in the scrape reliably identifies a company name (same reasoning as the
 post-attribution fix below); the AI may still mention one in prose if the job post text states it.
@@ -246,6 +252,43 @@ on `automailsend_app_state`, both `null` by default (zero behavior change until 
 - The API route pattern (`/api/admin/users/route.ts`) checks `!== undefined`, not `!== null`, when deciding
   whether to touch these columns in a PATCH — an explicit `null` in the request body correctly *clears* an
   override, distinct from the field simply not being sent.
+
+## Dual credit system + automated follow-up emails (2026-08-31, MVP push)
+Operator push toward a real launch (3-5 paying users, 25-50 emails/day each): "There will be a price on
+everything, everything, even sending mail with the template... you are using my server, you are using the
+application that I have built." Two credit currencies now, both on `automailsend_app_state`:
+- **`app_credits`** (new, default 2000 — deliberately generous since it gates every send from day one,
+  unlike `ai_credits`, which only ever gated opt-in AI features) — spent by `spendAppCredit`
+  (`backend/src/lib/appCredits.js` / `frontend/src/lib/appCredits.ts`) on **every** send: manual, template,
+  resume-attached, and follow-up. Checked as a pre-flight gate before any template/AI work in all 3 send
+  paths (`automail.worker.js`, `batchSend.worker.js`, `frontend/src/app/api/send/route.ts`), spent only
+  after `sendMail()` actually succeeds.
+- **`ai_credits`** (existing) — spent *in addition* to `app_credits` whenever AI actually wrote the content
+  (`ai-write` mode, or an AI-written follow-up slot). Unchanged in every other respect.
+- Insufficient-credit handling (either currency) is uniform: log once, skip that recipient silently after,
+  never change `recipient.status` or insert a `sent_log` row — a transient, admin-recoverable shortage must
+  never permanently drop a recipient (`batchSend.worker.js` in particular excludes anyone with an existing
+  `sent_log` row in `status in (sent, skipped)` from all future runs, so a `skipped` row there would be
+  permanent, not transient).
+- `frontend/src/app/api/send/route.ts` (Quick Send) had **no authentication at all** before this — added
+  `getAuthedUserId`, same pattern as `resume-import/route.ts`, since a credit spend now needs a real caller
+  identity. `QuickSendModal.tsx` sends a Bearer session token accordingly.
+
+**Follow-ups**: up to 3 per recipient, automated by a 5th scheduler loop (`backend/src/workers/
+followUp.worker.js`, wired into `scheduler.js` exactly like the other 4 `setInterval` loops — this backend
+is not BullMQ, see the note near the top of this file). Per-role settings (`automailsend_role_defs`):
+`follow_up_interval_days` (nullable — null means off for this role, no separate boolean flag column) and
+three independently-nullable `follow_up_template_{1,2,3}_id` FKs (null = AI writes that slot, the default;
+set = that template sent verbatim, no AI). `automailsend_recipients.next_follow_up_at` is precomputed at
+send time (via `computeNextFollowUpAt(roleDef)`, a small shared helper in `emailResolve.js`/`.ts`) rather
+than derived per-tick, so the worker's eligibility query is a plain indexed range scan
+(`idx_automailsend_recipients_followup_due`). A reply (`has_replied`, already flipped live by
+`replyPoll.worker.js`) stops further follow-ups automatically — the eligibility query checks it directly, no
+extra wiring needed. An SMTP failure retries the same slot's content on a 1-day backoff without advancing
+`follow_up_count`; a successful send always advances it, and hitting 3 sets `next_follow_up_at` back to
+null — that alone enforces the cap, no separate "exhausted" flag. AI-written follow-ups go through a new
+`generateFollowUpEmail` in `ai.service.js` (parallel to `generateAiPersonalizedEmail`), given the recipient's
+most recent `sent_log` row as "what was already said" so it writes a genuine continuation, not a repeat.
 
 ## Quick Send's synchronous path + queued-send feedback (2026-08-18)
 Bulk/per-row sends in the JAMS table go through the backend's polling batch queue

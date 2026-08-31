@@ -7,7 +7,11 @@
 // note on this exact function having drifted three times before it was consolidated).
 import type { CandidateProfile, Recipient } from "./types";
 
-type PlaceholderRecipient = Pick<Recipient, "email" | "title"> & { author_name?: string };
+type PlaceholderRecipient = Pick<Recipient, "email" | "title"> & {
+  author_name?: string;
+  lastSentAt?: string;
+  followUpCount?: number;
+};
 
 export function applyPlaceholders(
   text: string,
@@ -15,6 +19,10 @@ export function applyPlaceholders(
   profile?: Partial<CandidateProfile>
 ): string {
   const p = profile || {};
+  // Follow-up-specific tokens (2026-08-31) — resolve safely in ANY template (KEEP IN SYNC with the backend
+  // twin's identical comment/logic).
+  const lastSentDate = recipient.lastSentAt ? new Date(recipient.lastSentAt).toLocaleDateString() : "";
+  const followUpNumber = String((recipient.followUpCount || 0) + 1);
   return text
     .replaceAll("{{title}}", recipient.title || "")
     .replaceAll("{{name}}", recipient.author_name || "")
@@ -23,7 +31,9 @@ export function applyPlaceholders(
     .replaceAll("{{candidate_email}}", p.email || "")
     .replaceAll("{{candidate_phone}}", p.phone || "")
     .replaceAll("{{candidate_portfolio}}", p.portfolioUrl || "")
-    .replaceAll("{{candidate_resume_link}}", p.resumeUrl || "");
+    .replaceAll("{{candidate_resume_link}}", p.resumeUrl || "")
+    .replaceAll("{{last_sent_date}}", lastSentDate)
+    .replaceAll("{{follow_up_number}}", followUpNumber);
 }
 
 // Hard guardrail: no email may ever be sent with a literal unresolved {{...}} token in it.
@@ -31,8 +41,11 @@ export function hasUnresolvedPlaceholders(text: string): boolean {
   return /\{\{\s*[\w.]+\s*\}\}/.test(text || "");
 }
 
-// The 8 fixed tokens, for the "Insert variable" picker in QuickSendModal.tsx — same set documented in
-// RoleTemplates.tsx's HelpTooltip.
+// For the "Insert variable" picker in QuickSendModal.tsx — same set documented in RoleTemplates.tsx's
+// HelpTooltip. Deliberately does NOT include {{last_sent_date}}/{{follow_up_number}} (2026-08-31) — a Quick
+// Send recipient has no last_sent_at/follow_up_count by definition (it's a one-off manual send), so those
+// tokens would always resolve blank/"1" there; applyPlaceholders above still resolves them safely if
+// someone pastes one in anyway, this just keeps them out of the picker where they'd be meaningless.
 export const TEMPLATE_VARIABLES: { token: string; label: string }[] = [
   { token: "{{title}}", label: "Job title (search keyword)" },
   { token: "{{name}}", label: "Recruiter/poster name (if known)" },

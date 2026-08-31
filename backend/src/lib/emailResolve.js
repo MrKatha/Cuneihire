@@ -38,4 +38,13 @@ function describeFiles(files) {
   return files.map((f) => f.name).join(", ");
 }
 
-module.exports = { resolveRoleResume, resolveRoleAttachments, describeFiles };
+// Automated follow-ups (2026-08-31) — the timestamp a recipient becomes eligible for its next follow-up,
+// computed once at send time (not derived per-tick by followUp.worker.js) so its eligibility query is a
+// plain indexed range scan. null when the role has no interval set (follow-ups off for this role) — same
+// "nullable means unset" idiom as roleDef.resume_id. KEEP IN SYNC with frontend/src/lib/emailResolve.ts.
+function computeNextFollowUpAt(roleDef) {
+  const days = roleDef && roleDef.follow_up_interval_days;
+  return days && days > 0 ? new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString() : null;
+}
+
+module.exports = { resolveRoleResume, resolveRoleAttachments, describeFiles, computeNextFollowUpAt };

@@ -179,6 +179,7 @@ export default function Home() {
   const [automail, setAutomail] = useState(defaultState().automail);
   const [ai, setAi] = useState<AiConfig>(defaultState().ai);
   const [aiCredits, setAiCredits] = useState(defaultState().aiCredits);
+  const [appCredits, setAppCredits] = useState(defaultState().appCredits);
   // Manual per-user plan overrides (2026-08-25) — admin-granted, read-only from here. null = no override,
   // same behavior as every other account. See storage.ts's PersistedState comment.
   const [maxKeywords, setMaxKeywords] = useState(defaultState().maxKeywords);
@@ -320,6 +321,7 @@ export default function Home() {
       setAutomail(saved.automail);
       setAi(saved.ai);
       setAiCredits(saved.aiCredits);
+      setAppCredits(saved.appCredits);
       setMaxKeywords(saved.maxKeywords);
       setMinFetchIntervalOverride(saved.minFetchIntervalOverride);
       setRoleDefs(saved.roleDefs);
@@ -563,6 +565,7 @@ export default function Home() {
         automail,
         ai,
         aiCredits, // not saved in app_state — admin-granted, read-only from here
+        appCredits, // not saved in app_state — admin-granted, read-only from here
         maxKeywords, // not saved in app_state — admin-granted, read-only from here
         minFetchIntervalOverride, // not saved in app_state — admin-granted, read-only from here
         profile,
@@ -989,6 +992,7 @@ export default function Home() {
               sentTodayCount={sentTodayCount}
               globalMaxDailyLimit={globalMaxDailyLimit}
               aiCredits={aiCredits}
+              appCredits={appCredits}
               sentLog={sentLog}
               onOpenQuickSend={() => setShowQuickSend(true)}
               recipients={recipients}

@@ -25,6 +25,13 @@ function truncateForPrompt(text, maxLen) {
 // come out blank).
 function applyPlaceholders(text, recipient, profile) {
   const p = profile || {};
+  // Follow-up-specific tokens (2026-08-31) — resolve safely in ANY template, not just follow-up ones: a
+  // regular first-touch template using {{last_sent_date}} just renders blank (no prior send yet), same
+  // "blank rather than guessed" tolerance as every other token here. {{follow_up_number}} is derived from
+  // recipient.follow_up_count (0 on the initial send, 0/1/2 while a follow-up worker resolves slot 1/2/3),
+  // so it's meaningful specifically when a follow-up template/prompt uses it, harmless elsewhere.
+  const lastSentDate = recipient.last_sent_at ? new Date(recipient.last_sent_at).toLocaleDateString() : "";
+  const followUpNumber = String((recipient.follow_up_count || 0) + 1);
   return text
     .replaceAll("{{title}}", recipient.title || "")
     .replaceAll("{{name}}", recipient.author_name || "")
@@ -33,7 +40,9 @@ function applyPlaceholders(text, recipient, profile) {
     .replaceAll("{{candidate_email}}", p.email || "")
     .replaceAll("{{candidate_phone}}", p.phone || "")
     .replaceAll("{{candidate_portfolio}}", p.portfolioUrl || "")
-    .replaceAll("{{candidate_resume_link}}", p.resumeUrl || "");
+    .replaceAll("{{candidate_resume_link}}", p.resumeUrl || "")
+    .replaceAll("{{last_sent_date}}", lastSentDate)
+    .replaceAll("{{follow_up_number}}", followUpNumber);
 }
 
 // The hard guardrail: no email may ever be sent with a literal unresolved {{...}} token in it. Both
@@ -203,6 +212,69 @@ async function callAiJson(systemPrompt, userPrompt, temperature, userId, callTyp
 async function generateAiPersonalizedEmail(candidateInfo, recipient, contextText, baseTemplate, profile, temperature, userId) {
   const prompt = buildUserMessage(candidateInfo, contextText, baseTemplate, recipient, profile);
   return callAiJson(JOB_APPLICATION_SYSTEM_PROMPT, prompt, temperature, userId, "generate_personalized_email");
+}
+
+// Automated follow-ups (2026-08-31, MVP push) — up to 3 per recipient, AI-written by default (a candidate
+// can instead link a fixed template per slot, see followUp.worker.js — that path never reaches this
+// function). `previousEmail` is that recipient's most recent sent email ({subject, content}, read from
+// automailsend_sent_log by the caller) so the model can write a genuine continuation instead of repeating
+// the original pitch — same {subject, content} shape as generateAiPersonalizedEmail's `baseTemplate` param,
+// reused here as "what was already said" rather than "starting-point wording."
+const FOLLOW_UP_SYSTEM_PROMPT = `You write a brief, natural follow-up email on behalf of a job candidate who reached out about an opportunity and hasn't heard back. Your only output is a single JSON object — no markdown, no commentary.
+
+You will be given, in the user message:
+- CANDIDATE INFO / CANDIDATE CONTACT INFO / CONTACT NAME / SEARCH KEYWORD / JOB POST — same meaning as a first-touch email; use them the same way (real data only, never invent).
+- FOLLOW-UP NUMBER — which follow-up this is: 1, 2, or 3 (of a max of 3).
+- LAST SENT ON — the date the candidate's previous email (or previous follow-up) went out.
+- PREVIOUS EMAIL SUBJECT / PREVIOUS EMAIL BODY — the actual email already sent to this contact, so you can reference it naturally rather than repeating it.
+
+Decide first: is this still worth following up on (JOB POST is a real, plausibly-still-relevant opportunity)? If not (spam, clearly stale/filled, too vague), respond with exactly: {"skip": true, "reason": "<one short sentence>"}. Otherwise, continue below.
+
+Write the follow-up:
+1. Open by referencing that this is a follow-up to the earlier email (using LAST SENT ON naturally, e.g. "following up on my note from..." — don't just restate the date mechanically).
+2. Do NOT repeat the original pitch verbatim — add one new, brief angle (restate interest concisely, or surface one detail from CANDIDATE INFO not emphasized before) rather than resending the same content.
+3. The later the follow-up number, the shorter and lower-pressure the tone should be — follow-up 3 should read as a brief, polite final check-in, not an escalation.
+4. Never invent experience, credentials, or facts about the candidate that aren't in CANDIDATE INFO. Never output bracket/brace placeholders like [Name] or {{title}} — every field given is either real (use it) or unknown (omit).
+5. Sign off with the candidate's real name if given; include only whichever contact channels CANDIDATE CONTACT INFO actually lists.
+6. Keep it short — a follow-up should be noticeably briefer than a first-touch email, a few sentences at most.
+
+Output ONLY this JSON shape: {"subject": "<email subject>", "body": "<the email body, plain text>"}`;
+
+function buildFollowUpUserMessage(candidateInfo, contextText, previousEmail, recipient, profile, followUpNumber) {
+  const lastSentBlock = recipient.last_sent_at
+    ? new Date(recipient.last_sent_at).toLocaleDateString()
+    : "unknown";
+  const previousEmailBlock = previousEmail
+    ? `PREVIOUS EMAIL SUBJECT:\n${previousEmail.subject || "(no subject)"}\n\nPREVIOUS EMAIL BODY:\n${previousEmail.content || previousEmail.body || "(no body)"}`
+    : `PREVIOUS EMAIL:\nNot available — write a generic but genuine follow-up.`;
+  return `CANDIDATE INFO:
+${candidateInfo && candidateInfo.trim() ? truncateForPrompt(candidateInfo.trim(), 4000) : "No candidate info provided — write generically but do not invent specifics."}
+
+CANDIDATE CONTACT INFO:
+${buildCandidateContactBlock(profile)}
+
+CONTACT NAME:
+${recipient.author_name && recipient.author_name.trim() ? recipient.author_name.trim() : "unknown"}
+
+SEARCH KEYWORD:
+${recipient.title && recipient.title.trim() ? recipient.title.trim() : "unknown"}
+
+FOLLOW-UP NUMBER:
+${followUpNumber} of 3
+
+LAST SENT ON:
+${lastSentBlock}
+
+${previousEmailBlock}
+
+JOB POST:
+${contextText || "No context provided."}`
+    + (recipient.source_url ? `\n\nSOURCE URL(S):\n${recipient.source_url}` : "");
+}
+
+async function generateFollowUpEmail(candidateInfo, recipient, contextText, previousEmail, profile, temperature, userId, followUpNumber) {
+  const prompt = buildFollowUpUserMessage(candidateInfo, contextText, previousEmail, recipient, profile, followUpNumber);
+  return callAiJson(FOLLOW_UP_SYSTEM_PROMPT, prompt, temperature, userId, "generate_follow_up_email");
 }
 
 // "ai-select" send mode (2026-08-19) — AI picks which of the role's OWN, user-written templates best
@@ -448,6 +520,7 @@ async function generateMatchKeywords(role, temperature, userId) {
 
 module.exports = {
   generateAiPersonalizedEmail,
+  generateFollowUpEmail,
   chooseTemplateForJob,
   applyPlaceholders,
   hasUnresolvedPlaceholders,

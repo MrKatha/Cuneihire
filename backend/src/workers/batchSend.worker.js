@@ -3,8 +3,9 @@ const { supabase } = require("../config/supabase");
 const { decryptPassword } = require("../lib/crypto");
 const { chooseTemplateForJob, generateAiPersonalizedEmail, applyPlaceholders, hasUnresolvedPlaceholders } = require("../services/ai.service");
 const { loadAccountPool, buildTransporter } = require("../lib/smtpPool");
-const { resolveRoleAttachments, describeFiles } = require("../lib/emailResolve");
+const { resolveRoleAttachments, describeFiles, computeNextFollowUpAt } = require("../lib/emailResolve");
 const { spendAiCredit } = require("../lib/aiCredits");
+const { spendAppCredit } = require("../lib/appCredits");
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -87,7 +88,7 @@ async function processBatchSendJob(job) {
 
     const { data: roleDefsArray } = await supabase
       .from("automailsend_role_defs")
-      .select("key, email_send_mode, selected_template_id, resume_id")
+      .select("key, email_send_mode, selected_template_id, resume_id, follow_up_interval_days, follow_up_template_1_id, follow_up_template_2_id, follow_up_template_3_id")
       .eq("user_id", user_id);
 
     const roleDefByKey = {};
@@ -148,6 +149,7 @@ async function processBatchSendJob(job) {
 
     const delayMs = delaySec * 1000;
     const transporters = new Map();
+    let appCreditsSkippedLogged = false;
 
     // 5. Send loop
     for (let i = 0; i < toProcess.length; i++) {
@@ -174,6 +176,16 @@ async function processBatchSendJob(job) {
 
       const recipient = toProcess[i];
 
+      // App credits (2026-08-31, MVP push) — checked before ANY template/AI/send work, same reasoning and
+      // "log once, skip silently after, no status change, no sent_log row" policy as automail.worker.js.
+      if (!(userState.app_credits > 0)) {
+        if (!appCreditsSkippedLogged) {
+          console.log(pc.yellow(`[BatchSend] User ${user_id} — out of app credits. Skipping remaining recipient(s) this batch.`));
+          appCreditsSkippedLogged = true;
+        }
+        continue;
+      }
+
       // 2026-08-20: role-mode-aware resolution replaces pickFromPool()'s randomization — three send
       // modes (manual / ai-select / ai-write). Same logic as automail.worker.js, see
       // docs/architecture.md's "Email Templates redesign" section and its follow-ups.
@@ -197,6 +209,9 @@ async function processBatchSendJob(job) {
           } catch (err) {
             console.error(pc.red(`[BatchSend] AI template choice failed for ${recipient.email}: ${err.message}. Falling back to the first template.`));
           }
+        } else if (userState.ai_personalization_enabled) {
+          // 2026-08-31: was a silent fallback with zero log line — now visible, matching automail.worker.js.
+          console.log(pc.yellow(`[BatchSend] Out of AI credits — falling back to the first template for ${recipient.email}.`));
         }
         if (!tpl) tpl = roleTemplates[0];
       }
@@ -212,7 +227,12 @@ async function processBatchSendJob(job) {
       let templateLabelForLog;
 
       if (sendMode === "ai-write") {
-        if (!userState.ai_personalization_enabled || !(userState.ai_credits > 0)) continue;
+        if (!userState.ai_personalization_enabled || !(userState.ai_credits > 0)) {
+          // 2026-08-31: was a bare continue with zero log line — now visible, matching automail.worker.js's
+          // ai-write WARN. Deliberately no status change / no sent_log row — same admin-recoverable policy.
+          console.log(pc.yellow(`[BatchSend] Out of AI credits — skipping AI-write for ${recipient.email}.`));
+          continue;
+        }
         let result;
         try {
           result = await generateAiPersonalizedEmail(userState.candidate_info, recipient, recipient.context_text, null, profile, userState.ai_temperature, user_id);
@@ -327,10 +347,20 @@ async function processBatchSendJob(job) {
           template_label: templateLabelForLog,
           resume_label: resumeLabelForLog,
           message_id: info && info.messageId ? info.messageId : null,
+          send_stage: "initial",
         });
 
+        // App credits (2026-08-31) — spent only after a successful send, alongside the follow-up
+        // scheduling fields, same "spend after success only" rule as ai_credits.
+        const spentApp = await spendAppCredit(supabase, user_id);
+        userState.app_credits = spentApp ? userState.app_credits - 1 : 0;
+
         await supabase.from("automailsend_recipients")
-          .update({ status: "sent" })
+          .update({
+            status: "sent",
+            last_sent_at: new Date().toISOString(),
+            next_follow_up_at: computeNextFollowUpAt(roleDef),
+          })
           .eq("user_id", user_id)
           .eq("email", recipient.email);
 
