@@ -1,6 +1,7 @@
 const pc = require("picocolors");
 const { supabase } = require("./config/supabase");
 const { processJob } = require("./workers/scraper.worker");
+const { processJob: processJobSpyJob } = require("./workers/jobspy.worker");
 const { runAutomailJobs } = require("./workers/automail.worker");
 
 const { processBatchSendJob } = require("./workers/batchSend.worker");
@@ -174,11 +175,11 @@ function startScheduler() {
 
         if (shouldRun) {
           lastQueuedMap.set(user.user_id, nowMs);
-          
+
           // IMPORTANT: Bypass Redis/BullMQ entirely by executing the worker directly in the Node process.
           // This prevents infinite hangs on Windows machines that do not have a local Redis server running.
           console.log(pc.cyan(`✨ [Scheduler] Triggering job for user ${user.user_id.split('-')[0]}... (interval reached)`));
-          
+
           processJob({ data: user }).catch(err => {
              console.error(pc.red(`[Scheduler/Worker] Job failed: ${err.message}`));
           });
@@ -188,6 +189,63 @@ function startScheduler() {
       }
     }
   }, tickSec * 1000);
+
+  // Open-source job sourcing via JobSpy/Indeed (2026-08-31) — 6th independent loop, own opt-in flag
+  // (jobspy_sourcing_enabled, separate from auto_fetch_enabled — additive to the LinkedIn scraper above,
+  // not a replacement for it), own local queued-throttle map so the two loops' per-user timing never
+  // interferes. A much longer default interval than LinkedIn's (60min vs. a 180min *floor* but often-tighter
+  // real usage) — Indeed's own listings don't change minute-to-minute the way a LinkedIn feed does, and
+  // being a good citizen against Indeed's own rate limits matters since JobSpy has no official API contract
+  // with them. See docs/architecture.md's "Open-source job sourcing" section.
+  const jobspyTickSec = process.env.JOBSPY_SCHEDULER_INTERVAL_SEC ? parseInt(process.env.JOBSPY_SCHEDULER_INTERVAL_SEC, 10) : 60;
+  const jobspyIntervalMin = process.env.JOBSPY_INTERVAL_MIN ? parseInt(process.env.JOBSPY_INTERVAL_MIN, 10) : 60;
+  console.log(pc.green(`🚀 Starting JobSpy/Indeed Worker (checking every ${jobspyTickSec} seconds, ${jobspyIntervalMin}min between runs per user)...`));
+  const lastJobSpyQueuedMap = new Map();
+  setInterval(async () => {
+    console.log(pc.dim(`[Scheduler] Checking for users due for Indeed job sourcing...`));
+
+    const { data: users, error } = await supabase
+      .from("automailsend_app_state")
+      .select("*")
+      .eq("jobspy_sourcing_enabled", true);
+
+    if (error) {
+      console.error(pc.red(`[Scheduler] Error fetching JobSpy-enabled users: ${error.message}`));
+      return;
+    }
+    if (!users || users.length === 0) return;
+
+    for (const user of users) {
+      try {
+        const { data: logs } = await supabase
+          .from("automailsend_execution_logs")
+          .select("created_at")
+          .eq("user_id", user.user_id)
+          .contains("details", { jobType: "jobspy" })
+          .order("created_at", { ascending: false })
+          .limit(1);
+
+        let shouldRun = true;
+        if (logs && logs.length > 0) {
+          const diffMin = (Date.now() - new Date(logs[0].created_at).getTime()) / (1000 * 60);
+          if (diffMin < jobspyIntervalMin) shouldRun = false;
+        }
+
+        const lastQueued = lastJobSpyQueuedMap.get(user.user_id) || 0;
+        if (Date.now() - lastQueued < 60000) shouldRun = false;
+
+        if (shouldRun) {
+          lastJobSpyQueuedMap.set(user.user_id, Date.now());
+          console.log(pc.cyan(`✨ [Scheduler] Triggering JobSpy/Indeed search for user ${user.user_id.split('-')[0]}... (interval reached)`));
+          processJobSpyJob({ data: user }).catch(err => {
+            console.error(pc.red(`[Scheduler/Worker] JobSpy job failed: ${err.message}`));
+          });
+        }
+      } catch (err) {
+        console.error(pc.red(`[Scheduler] Failed to process JobSpy job for user ${user.user_id}: ${err.message}`));
+      }
+    }
+  }, jobspyTickSec * 1000);
 }
 
 module.exports = { startScheduler };

@@ -32,5 +32,14 @@ jobs:
             cd backend
             npm i
 
+            echo "Installing/upgrading JobSpy (Python) for open-source job sourcing..."
+            # Best-effort, never fails the deploy -- see docs/architecture.md's "Open-source job sourcing"
+            # section. jobspy.worker.js's own JobSpy-search calls will error with a clear message (surfaced
+            # in that user's execution log) until this succeeds, but the rest of the app is unaffected
+            # either way -- jobspy_sourcing_enabled defaults to false, so nothing calls this until an
+            # account opts in.
+            (command -v python3 >/dev/null 2>&1 && python3 -m pip install --user -U python-jobspy) \
+              || echo "WARNING: python3/pip not available or install failed -- JobSpy sourcing will error until this is fixed manually on the server."
+
             echo "Restarting PM2 process..."
             pm2 restart auto_apply_linkedin_backend --update-env

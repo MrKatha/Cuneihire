@@ -5,7 +5,7 @@ import { supabaseAdmin, verifyAdmin } from "@/lib/adminAuth";
 // backend/src/lib/logger.js's ExecutionLogger callers. batchSend.worker.js never writes to this table
 // (despite an SQL comment claiming otherwise), so there's no entry for it here. follow_up added 2026-08-31
 // (backend/src/workers/followUp.worker.js).
-const JOB_TYPES = ["scraper", "automail", "reply_poll", "follow_up"] as const;
+const JOB_TYPES = ["scraper", "jobspy", "automail", "reply_poll", "follow_up"] as const;
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const WEEK_MS = 7 * DAY_MS;

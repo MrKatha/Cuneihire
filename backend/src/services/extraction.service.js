@@ -292,5 +292,8 @@ function extractPaginatedContacts(rawStr) {
 module.exports = {
   extractContactsWithAttribution,
   extractInitialContacts,
-  extractPaginatedContacts
+  extractPaginatedContacts,
+  // Exported 2026-08-31 for jobspy.worker.js to reuse the exact same email regex/cleanup against a
+  // JobSpy listing's description text, instead of a second copy of the same logic.
+  extractEmailsFrom,
 };

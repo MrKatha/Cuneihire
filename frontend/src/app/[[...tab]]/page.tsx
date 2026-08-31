@@ -188,6 +188,7 @@ export default function Home() {
   const [planTier, setPlanTier] = useState(defaultState().planTier);
   const [subscriptionStatus, setSubscriptionStatus] = useState(defaultState().subscriptionStatus);
   const [currentPeriodEndsAt, setCurrentPeriodEndsAt] = useState(defaultState().currentPeriodEndsAt);
+  const [jobspySourcingEnabled, setJobspySourcingEnabled] = useState(defaultState().jobspySourcingEnabled);
   // Automation's daily-limit ceiling, shown on JAMS's Overview sub-tab (2026-08-25) — admin-configurable,
   // one global number for now (no billing/plan system yet). Public route, no auth needed, same as
   // allow_signups on the signup page.
@@ -331,6 +332,7 @@ export default function Home() {
       setPlanTier(saved.planTier);
       setSubscriptionStatus(saved.subscriptionStatus);
       setCurrentPeriodEndsAt(saved.currentPeriodEndsAt);
+      setJobspySourcingEnabled(saved.jobspySourcingEnabled);
       setRoleDefs(saved.roleDefs);
       setSmtpAccounts(saved.smtpAccounts);
       setSending(saved.batchSendPending);
@@ -578,6 +580,7 @@ export default function Home() {
         planTier, // not saved in app_state — webhook-granted, read-only from here
         subscriptionStatus, // not saved in app_state — webhook-granted, read-only from here
         currentPeriodEndsAt, // not saved in app_state — webhook-granted, read-only from here
+        jobspySourcingEnabled,
         profile,
         batchSendPending: sending,
       }).then(() => {
@@ -588,7 +591,7 @@ export default function Home() {
     return () => {
       if (saveTimer.current) clearTimeout(saveTimer.current);
     };
-  }, [hydrated, userId, config, delaySec, activeTemplateRole, defaultTitle, autoFetch, automail, ai, recipients, sentLog]);
+  }, [hydrated, userId, config, delaySec, activeTemplateRole, defaultTitle, autoFetch, automail, ai, recipients, sentLog, jobspySourcingEnabled]);
 
   // Debounced auto-save for the candidate profile (2026-08-19) — its own table/save path now, separate
   // from the app_state round trip above (see storage.ts's saveCandidateProfile).
@@ -1130,6 +1133,8 @@ export default function Home() {
               planTier={planTier}
               subscriptionStatus={subscriptionStatus}
               currentPeriodEndsAt={currentPeriodEndsAt}
+              jobspySourcingEnabled={jobspySourcingEnabled}
+              onJobspySourcingChange={setJobspySourcingEnabled}
             />
           )}
 

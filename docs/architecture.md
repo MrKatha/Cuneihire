@@ -328,6 +328,51 @@ already-encrypted row with stale local-state plaintext. `scraper.worker.js` decr
 `auto_fetch_raw_headers` immediately before its existing `JSON.parse` (legacy-passthrough-safe via
 `decryptPassword`'s existing "not `enc:`-prefixed? pass through unchanged" behavior). Zero schema change.
 
+## Open-source job sourcing via JobSpy/Indeed (2026-08-31, v1)
+Operator wanted to reduce reliance on LinkedIn's own feed search (ban-risk, no structural guarantee a
+result is even a real job — see the `looksLikeJobPost` gate above) and fund generous free trials off spare
+**server** credits rather than scarce **AI** credits. Revived the previously-backlogged idea (`86eyt8mwt`):
+JobSpy (`speedyapply/JobSpy`, MIT), an open-source scraper pulling from job boards' actual **structured
+listing** data, not a social feed.
+
+**Additive, not a replacement** — the existing LinkedIn-cookie scraper (`auto_fetch_enabled`) is completely
+untouched. This is a second, independent, opt-in ingestion path (`jobspy_sourcing_enabled` on
+`automailsend_app_state`) feeding the exact same `automailsend_job_posts`/`automailsend_recipients` schema
+and the same downstream pipeline (`looksLikeJobPost` → `computeAlgorithmicMatch`/`scoreJobMatch` →
+`automail`/`batchSend`), unchanged. Reuses each role's existing `keywords`/`preferred_locations` — no
+separate config surface.
+
+**v1 is deliberately scoped to Indeed only, real-emails-only** — two real constraints found during live
+research, not assumptions: (1) LinkedIn via JobSpy needs proxies to be reliable ("proxies are a must
+basically," their own docs) — a real recurring cost that contradicts "server credits only." Indeed has no
+such requirement. (2) JobSpy's output has no contact-person field, only `company` — the current LinkedIn
+scraper's real edge (a real person's own post + their email) has no equivalent here. It does have an
+`emails` field (regex-extracted from the listing description, same idea as this app's own
+`extraction.service.js`), reused directly (unioned with a second pass via the now-exported
+`extractEmailsFrom`) — **a listing with no discoverable email is skipped entirely**, same "nothing new,
+nothing to do" rule the existing pipeline already applies to zero-contact groups. Reconstructing a
+generic company email (careers@/hr@ + guessed domain, SMTP-verified) is a real v2 project with its own
+bounce-risk and a licensing wrinkle (the credible self-hosted verifier found, Reacher, is AGPL-3.0) —
+deferred, not built.
+
+Architecture: `backend/src/scripts/jobspy_scrape.py` (JobSpy has no CLI, only a Python function — this is
+the bridge) reads search params from stdin, prints listings as JSON to stdout, no state/DB access.
+`backend/src/lib/jobspyBridge.js` spawns it (`JOBSPY_PYTHON_BIN`, default `python3`), generous timeout.
+`backend/src/workers/jobspy.worker.js` is a **separate, self-contained worker**, not a refactor of
+`scraper.worker.js`'s `saveContacts` — that closure has too much run-scoped mutable state to safely extract
+under this timeline in a repo with zero automated tests, so there's real duplication between the two
+workers' dedup→gate→score→insert logic (a deliberate, risk-driven trade-off, not an oversight). v1 also
+skips the AI-match-keyword caching optimization (`ensureMatchKeywords`) — correct either way, just without
+that optimization's credit savings for an `ai_instructions` role. Wired into `scheduler.js` as a 6th
+independent loop (own `jobspy_sourcing_enabled` query, own per-user throttle map, 60min default interval —
+much longer than LinkedIn's, since Indeed's listings don't change minute-to-minute and JobSpy has no
+official rate-limit contract with them). `automailsend_job_posts.source` (`'linkedin_scrape'` |
+`'jobspy_indeed'`) stamps which pipeline produced a post, for admin/JAMS visibility only.
+
+**New deploy-time dependency**: Python 3.10+ and `python-jobspy` on the production server —
+`.github/workflows/backend-deploy.yml` now best-effort-installs it on every deploy (never fails the deploy
+if Python isn't set up; the feature just errors clearly, gated off by default, until it is).
+
 ## Lemon Squeezy subscriptions (2026-08-31, foundation hardening)
 Real recurring billing, replacing "credits are 100% admin-granted" as the only lever. Chosen over
 Stripe/Paddle specifically for confirmed Pakistan-seller payout support. New nullable columns on

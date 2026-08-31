@@ -984,3 +984,16 @@ alter table public.automailsend_app_state
 -- fresh checkout's custom_data.user_id — resolved via this instead.
 create index if not exists idx_automailsend_app_state_ls_subscription
   on public.automailsend_app_state (ls_subscription_id);
+
+-- Open-source job sourcing via JobSpy (2026-08-31, v1 scoped to Indeed only — see docs/architecture.md).
+-- Purely additive: the existing LinkedIn-cookie scraper (auto_fetch_enabled) is completely untouched: this
+-- is a second, independent, opt-in ingestion path feeding the exact same automailsend_job_posts/
+-- automailsend_recipients pipeline (looksLikeJobPost -> match scoring -> send), not a replacement.
+alter table public.automailsend_app_state
+  add column if not exists jobspy_sourcing_enabled boolean not null default false;
+
+-- Which pipeline actually produced a given job post — admin/JAMS visibility only, not used for any
+-- dedup/eligibility logic (source_url's own uniqueness already handles that, and LinkedIn/Indeed URLs can
+-- never collide). Default matches every existing row's true origin (the only pipeline that existed before).
+alter table public.automailsend_job_posts
+  add column if not exists source text not null default 'linkedin_scrape'; -- 'linkedin_scrape' | 'jobspy_indeed'

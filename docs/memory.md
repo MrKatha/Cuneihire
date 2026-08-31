@@ -2,6 +2,22 @@
 
 Newest on top. Terse bullets only — done / in-progress / locked decisions / open items. Update every phase.
 
+- **2026-08-31 — DONE (code, pending local verification): open-source job sourcing via JobSpy/Indeed, v1.**
+  Operator pulled forward the previously-backlogged idea (`86eyt8mwt`) despite an honest "1-2 week full
+  scope" warning — live research during planning cut it down to something actually shippable: v1 is
+  Indeed-only (LinkedIn via JobSpy needs paid proxies, JobSpy docs: "proxies are a must basically" — real
+  recurring cost, deferred) and real-emails-only (no contact-person field in JobSpy's output, only
+  `company` — generic email guessing + SMTP verification is a real v2 project, deferred, plus the credible
+  self-hosted verifier found, Reacher, is AGPL-3.0, a licensing wrinkle for a commercial product). Additive
+  to the existing LinkedIn scraper, not a replacement — new opt-in `jobspy_sourcing_enabled` toggle, same
+  downstream pipeline (`looksLikeJobPost`/scoring/send) untouched. New: `jobspy_scrape.py` (Python bridge,
+  JobSpy has no CLI), `jobspyBridge.js`, `jobspy.worker.js` (deliberately a SEPARATE self-contained worker,
+  not a refactor of `scraper.worker.js`'s `saveContacts` — real duplication accepted to avoid risking the
+  live LinkedIn scraper mid-feature in a zero-test-suite repo), 6th scheduler loop, deploy-workflow Python
+  install step (best-effort, never fails the deploy). Build/lint clean, zero new debt. **Pending**: a real
+  local smoke-test scrape against Indeed — `python-jobspy`'s pip install (pandas et al.) is running unusually
+  long locally, not yet confirmed complete as of this entry. Feature ships gated off by default regardless
+  (`jobspy_sourcing_enabled` defaults false), so shipping the code ahead of that final live check is safe.
 - **2026-08-31 — DONE: "is this even a job post?" gate — closes a real false-positive bug the operator hit
   live** (a WhatsApp-automation-tool ad got saved as a contact for matching most of a role's search
   keywords). Root cause: every relevance check (`computeAlgorithmicMatch`/`scoreJobMatch`/exclude-keywords)
