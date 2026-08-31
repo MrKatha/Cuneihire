@@ -2,6 +2,20 @@
 
 Newest on top. Terse bullets only — done / in-progress / locked decisions / open items. Update every phase.
 
+- **2026-08-31 — PARTIAL, BLOCKED on the DB piece: staging environment.** Operator's own proposal (separate
+  by branch not repo, given the existing `supabase_setup.sql` byte-identical-twin fragility). Done and
+  usable today: `staging` git branch, `.github/workflows/backend-deploy-staging.yml` (2nd PM2 process on the
+  same droplet, self-bootstrapping checkout, `.env` regenerated from GitHub Secrets each deploy), Vercel's
+  frontend preview deploys (already free/automatic, no new work). **Blocked**: a separate staging Supabase
+  project — the "Cuneihive Products" org's free-plan project cap turned out to be per-member across every
+  org that member administers, not per-org, so pausing "UMS" (Axion UMS's project, unrelated to this repo;
+  paused with operator go-ahead, confirmed `INACTIVE`) did not clear it. Considered Supabase Branching as an
+  alternative — real cost (Pro plan + ~$9-10/mo per branch) and a real migration-workflow conversion, so
+  deferred rather than adopted. **Operator decision: park it here** — production active, UMS stays paused,
+  no new project for now; revisit via either a second Supabase account (needs the operator's own signup,
+  can't be automated) or a paid plan once revenue justifies Branching. Don't trigger the staging deploy
+  workflow until a staging Supabase project + its 5 `STAGING_*` GitHub Secrets exist — see
+  docs/architecture.md's "Staging environment" section for the full account of what was tried.
 - **2026-08-31 — DONE (code, pending local verification): open-source job sourcing via JobSpy/Indeed, v1.**
   Operator pulled forward the previously-backlogged idea (`86eyt8mwt`) despite an honest "1-2 week full
   scope" warning — live research during planning cut it down to something actually shippable: v1 is
