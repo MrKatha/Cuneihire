@@ -52,6 +52,7 @@ jobs:
             SUPABASE_PROJECT_REF=${{ secrets.STAGING_SUPABASE_PROJECT_REF }}
             ENCRYPTION_KEY=${{ secrets.STAGING_ENCRYPTION_KEY }}
             GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}
+            JOBSPY_SOURCING_ENABLED_GLOBALLY=true
             ENVEOF
 
             echo "Installing backend dependencies..."

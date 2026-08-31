@@ -173,20 +173,28 @@ export function SettingsTab({
           <span className={linkedInConnected ? "badge ok" : "badge warn"}>{linkedInConnected ? "Connected" : "Not connected"}</span>
           <span className="hint compact">{linkedInConnected ? "Auto-fetching new posts on your schedule." : "Install the extension and connect to start scraping."}</span>
         </div>
-        <hr style={{ border: "0", borderTop: "1px solid var(--line)", margin: "0.75rem 0" }} />
-        <label className="field" style={{ display: "flex", flexDirection: "row", alignItems: "center", gap: "0.5rem" }}>
-          <input
-            type="checkbox"
-            checked={jobspySourcingEnabled}
-            onChange={(e) => onJobspySourcingChange(e.target.checked)}
-            style={{ width: "1.1rem", height: "1.1rem" }}
-          />
-          <span>Also search Indeed (no LinkedIn login needed)</span>
-        </label>
-        <p className="hint compact" style={{ margin: "0.25rem 0 0" }}>
-          Uses your roles&apos; existing keywords to search Indeed&apos;s own job listings directly —
-          no LinkedIn session involved, and only sends where a real email is found in the listing.
-        </p>
+        {/* Indeed/JobSpy sourcing (2026-08-31) -- operator decision: dev/staging-only until further notice,
+            not just "off by default" (see backend/src/scheduler.js's matching env-gate). The toggle itself
+            only renders when NEXT_PUBLIC_JOBSPY_SOURCING_AVAILABLE is set (Vercel Preview env only, not
+            Production) -- a production user shouldn't see a switch that silently does nothing. */}
+        {process.env.NEXT_PUBLIC_JOBSPY_SOURCING_AVAILABLE === "true" && (
+          <>
+            <hr style={{ border: "0", borderTop: "1px solid var(--line)", margin: "0.75rem 0" }} />
+            <label className="field" style={{ display: "flex", flexDirection: "row", alignItems: "center", gap: "0.5rem" }}>
+              <input
+                type="checkbox"
+                checked={jobspySourcingEnabled}
+                onChange={(e) => onJobspySourcingChange(e.target.checked)}
+                style={{ width: "1.1rem", height: "1.1rem" }}
+              />
+              <span>Also search Indeed (no LinkedIn login needed)</span>
+            </label>
+            <p className="hint compact" style={{ margin: "0.25rem 0 0" }}>
+              Uses your roles&apos; existing keywords to search Indeed&apos;s own job listings directly —
+              no LinkedIn session involved, and only sends where a real email is found in the listing.
+            </p>
+          </>
+        )}
       </Card>
 
       <div>
