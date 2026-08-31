@@ -38,9 +38,13 @@ jobs:
             # in that user's execution log) until this succeeds, but the rest of the app is unaffected
             # either way -- jobspy_sourcing_enabled defaults to false, so nothing calls this until an
             # account opts in. python3 exists on this server by default but python3-pip does not (confirmed
-            # live, 2026-08-31: "No module named pip") -- install it first, also best-effort.
+            # live, 2026-08-31: "No module named pip") -- install it first, also best-effort. This Ubuntu
+            # version also enforces PEP 668 (externally-managed-environment) by default, which blocks a
+            # plain `pip install` outside a venv (confirmed live, same deploy) -- --break-system-packages
+            # is the correct override for exactly this case (a small single-purpose backend server, not a
+            # shared system where apt-vs-pip package conflicts matter).
             (command -v pip3 >/dev/null 2>&1 || sudo apt-get install -y -qq python3-pip) \
-              && (python3 -m pip install --user -U python-jobspy) \
+              && (python3 -m pip install --user --break-system-packages -U python-jobspy) \
               || echo "WARNING: python3/pip setup or the python-jobspy install failed -- JobSpy sourcing will error until this is fixed manually on the server."
 
             echo "Restarting PM2 process..."
