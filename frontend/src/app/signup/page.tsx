@@ -160,6 +160,12 @@ export default function SignUpPage() {
           {error && <p className="text-[var(--danger)] text-sm">{error}</p>}
           {success && <p className="text-[var(--ok)] text-sm">{success}</p>}
 
+          <p className="text-xs text-center" style={{ color: 'var(--muted)' }}>
+            By creating an account you agree to our{" "}
+            <Link href="/terms" className="text-[var(--accent)] hover:underline">Terms of Service</Link>{" "}
+            and <Link href="/privacy" className="text-[var(--accent)] hover:underline">Privacy Policy</Link>.
+          </p>
+
           <div className="pt-2">
             <button
               type="submit"
