@@ -34,4 +34,5 @@ Read on demand, not eagerly — each covers one concern:
 - `docs/design.md` — product/UX principles and this app's flow
 - `docs/role.md` — the admin/user access model and how it's enforced
 - `docs/tools.md` — infra/integrations this project actually uses
+- `docs/pricing-tiers.md` — candidate plan tiers spec (Free/Pro/Premium), the real admin-override levers they map onto, and gaps found while designing it
 - `docs/memory.md` — living hand-off notes; read first when resuming work, update every phase

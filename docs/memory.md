@@ -2,6 +2,15 @@
 
 Newest on top. Terse bullets only — done / in-progress / locked decisions / open items. Update every phase.
 
+- **2026-08-29 — DONE (spec only): Candidate pricing tiers (`86eyrp54a`).** New `docs/pricing-tiers.md` —
+  Free/Pro/Premium, built entirely from the 4 real existing admin-override levers (ai_credits, max_keywords,
+  min_fetch_interval_override, daily_mail_limit), no new schema/code. Two real gaps surfaced and documented,
+  not fixed: (1) the platform Gemini key is still free-tier, 20 requests/day shared across everyone — AI
+  credit numbers in the spec are sized for after that upgrade, don't roll out yet; (2) daily_mail_limit is
+  clamped by ONE global `max_daily_send_limit` (100) regardless of tier, so Premium's proposed 150/day cap
+  needs that global ceiling raised first. Confirmed `allowed_products` is a dead field (written, never read)
+  — can't gate whole features per tier today. Suggested (not built) an optional `plan_tier` label column for
+  the admin UI. No self-serve billing — accounts stay admin-created per the 2026-08-26 decision.
 - **2026-08-29 — DONE: Cost & usage metering per user (Phase 3 task 1, ClickUp `86eyrp548`).** Two new
   ledgers, `automailsend_ai_usage_log` (real Gemini token counts + $ cost, computed at insert time from a
   runtime-date-branched pricing constant — `getGeminiRates()` in `backend/src/lib/aiUsage.js` and its inline
