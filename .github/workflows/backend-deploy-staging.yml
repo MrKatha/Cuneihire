@@ -1,0 +1,70 @@
+name: Deploy Backend (Staging)
+
+# Staging environment (added 2026-08-31) -- see docs/architecture.md's "Staging environment" section.
+# Runs on the SAME droplet as production, as a second/independent PM2 process, checked out from the
+# `staging` branch into a separate directory, pointed at a completely separate Supabase project so
+# experiments here can never touch production data or send real mail through a live account.
+# Trigger this manually the first time (gh workflow run backend-deploy-staging.yml --ref staging) to
+# bootstrap the checkout -- after that, every push to `staging` (touching backend/**) redeploys it.
+
+on:
+  push:
+    branches:
+      - staging
+    paths:
+      - "backend/**"
+      - ".github/workflows/backend-deploy-staging.yml"
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deploy to Server via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_IP }}
+          username: ${{ secrets.SERVER_USER }}
+          port: ${{ secrets.SERVER_PORT }}
+          key: ${{ secrets.SERVER_PRIVATE_KEY }}
+          script: |
+            set -e
+            STAGING_DIR=/srv/ismail_data/auto_apply_linkedin_staging
+            PROD_DIR=/srv/ismail_data/auto_apply_linkedin
+
+            if [ ! -d "$STAGING_DIR/.git" ]; then
+              echo "First run: bootstrapping the staging checkout from the same remote production already uses..."
+              REMOTE_URL=$(git -C "$PROD_DIR" remote get-url origin)
+              git clone -b staging "$REMOTE_URL" "$STAGING_DIR"
+            fi
+
+            cd "$STAGING_DIR"
+            git checkout staging
+            git pull origin staging
+
+            echo "Writing backend/.env for staging from GitHub Secrets (source of truth, not server state)..."
+            cat > backend/.env << ENVEOF
+            NEXT_PUBLIC_SUPABASE_URL=${{ secrets.STAGING_SUPABASE_URL }}
+            NEXT_PUBLIC_SUPABASE_ANON_KEY=${{ secrets.STAGING_SUPABASE_ANON_KEY }}
+            SUPABASE_SERVICE_ROLE_KEY=${{ secrets.STAGING_SUPABASE_SERVICE_ROLE_KEY }}
+            SUPABASE_ACCESS_TOKEN=${{ secrets.SUPABASE_ACCESS_TOKEN }}
+            SUPABASE_PROJECT_REF=${{ secrets.STAGING_SUPABASE_PROJECT_REF }}
+            ENCRYPTION_KEY=${{ secrets.STAGING_ENCRYPTION_KEY }}
+            GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}
+            ENVEOF
+
+            echo "Installing backend dependencies..."
+            cd backend
+            npm i
+
+            echo "Installing/upgrading JobSpy (Python) for open-source job sourcing (staging)..."
+            (command -v pip3 >/dev/null 2>&1 || sudo apt-get install -y -qq python3-pip) \
+              && (python3 -m pip install --user --break-system-packages -U python-jobspy) \
+              || echo "WARNING: python3/pip setup or the python-jobspy install failed on staging."
+
+            echo "Starting/restarting the staging PM2 process..."
+            pm2 describe auto_apply_linkedin_backend_staging > /dev/null 2>&1 \
+              && pm2 restart auto_apply_linkedin_backend_staging --update-env \
+              || pm2 start src/scheduler.js --name auto_apply_linkedin_backend_staging --cwd "$STAGING_DIR/backend"
+            pm2 save
