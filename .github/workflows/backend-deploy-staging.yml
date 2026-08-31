@@ -66,5 +66,5 @@ jobs:
             echo "Starting/restarting the staging PM2 process..."
             pm2 describe auto_apply_linkedin_backend_staging > /dev/null 2>&1 \
               && pm2 restart auto_apply_linkedin_backend_staging --update-env \
-              || pm2 start src/scheduler.js --name auto_apply_linkedin_backend_staging --cwd "$STAGING_DIR/backend"
+              || pm2 start src/index.js --name auto_apply_linkedin_backend_staging --cwd "$STAGING_DIR/backend"
             pm2 save
