@@ -18,6 +18,19 @@ columns (NaN/NaT don't survive json.dumps, so they're normalized to null/empty f
 """
 import sys
 import json
+import math
+
+
+def _clean(value):
+    # Pandas gotcha found via live testing (2026-08-31): assigning None into a float64 column (as
+    # df.where(df.notnull(), None) does below) gets silently coerced right back into NaN, because pandas
+    # upcasts None to NaN to keep numeric columns numeric. That NaN then survives into the dict this script
+    # builds and breaks json.dumps at the field level (a raw NaN literal isn't valid JSON). The DataFrame-
+    # level scrub only actually works for object/string columns, not numeric ones -- so numeric fields
+    # (min_amount/max_amount) need this same NaN check again, per-value, on the way out.
+    if isinstance(value, float) and math.isnan(value):
+        return None
+    return value
 
 def main():
     try:
@@ -62,8 +75,8 @@ def main():
                 "company": row.get("company") or "",
                 "location": row.get("location") or "",
                 "job_type": row.get("job_type") or "",
-                "min_amount": row.get("min_amount"),
-                "max_amount": row.get("max_amount"),
+                "min_amount": _clean(row.get("min_amount")),
+                "max_amount": _clean(row.get("max_amount")),
                 "job_url": row.get("job_url") or "",
                 "description": row.get("description") or "",
                 "emails": row.get("emails") or [],
