@@ -2,6 +2,19 @@
 
 Newest on top. Terse bullets only — done / in-progress / locked decisions / open items. Update every phase.
 
+- **2026-08-31 — DONE: Terms of Service, Privacy Policy, Refund Policy — the blocking requirement for
+  Lemon Squeezy store approval** (`86eyrp54p`, closed). Live: `/terms`, `/privacy`, `/refund-policy`, all
+  on a shared `LegalPageShell` component (cross-links, consistent typography, no client JS). Content is
+  specific to this product, not generic boilerplate — covers the "you're responsible for LinkedIn/CAN-
+  SPAM/GDPR compliance, not us" allocation implicit in how the product already works (user's own
+  connected session/email account, not ours), Lemon Squeezy as Merchant of Record, and the third-party
+  contact data the outreach feature extracts from public posts. Linked from the global footer site-wide
+  + a new consent line on `/signup` (neither existed before). **Placeholder contact**: `help@cuneihive.com`
+  (operator decision) — swap to `help@cuneihive.com` → `help@cuneihire.com` once that domain is live, in
+  all three page files. **Entity**: "Muhammad Sohaib Amin, trading as Cuneihive," Pakistan law (operator
+  decision — no separate registered entity exists yet). Not legal advice; flagged to the operator as worth
+  a real lawyer's review once there's paying-customer volume. Build/lint clean (144 baseline, unchanged).
+  Deployed to production (`hire.cuneihive.com`), confirmed all three routes return 200 live.
 - **2026-08-31 — PARTIAL, BLOCKED on the DB piece: staging environment.** Operator's own proposal (separate
   by branch not repo, given the existing `supabase_setup.sql` byte-identical-twin fragility). Done and
   usable today: `staging` git branch, `.github/workflows/backend-deploy-staging.yml` (2nd PM2 process on the
