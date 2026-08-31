@@ -2,6 +2,43 @@
 
 Newest on top. Terse bullets only — done / in-progress / locked decisions / open items. Update every phase.
 
+- **2026-08-31 — DONE: fixed a real plaintext-credential-at-rest bug (foundation-hardening Workstream A).**
+  Operator pushed back on an MVP-gap assessment that skipped security/payment architecture entirely; auditing
+  found `docs/rules.md`'s claim that the AES-256-GCM scheme covers "SMTP passwords, LinkedIn session cookie"
+  was only half true — SMTP passwords are encrypted, the LinkedIn session (`cookie_li_at`/`cookie_jsessionid`,
+  and the actually-scraping-critical `auto_fetch_raw_headers` JSON blob) was not, confirmed via full write-
+  path trace. That pair is a complete, working LinkedIn session — no password/MFA needed to use it. Fixed by
+  mirroring the SMTP pattern exactly: `frontend/src/app/api/verify-linkedin/route.ts` now decrypts-if-needed
+  before pinging LinkedIn and returns `encrypted{LiAt,Jsessionid,RawHeaders}`; gained an auth gate
+  (`getAuthedUserId`) it never had. `AutoFetchModal.tsx`'s `handleConnect` (previously called `onSave`
+  directly with raw extension plaintext, bypassing verification entirely — the actual gap) is now async and
+  routes through the same call; `handleSave` now round-trips whenever there's a live connection to persist,
+  not just when Enabled is checked (closes a real edge case: toggling Enabled off before Save used to
+  silently overwrite an already-encrypted DB row with local-state plaintext). `backend/src/workers/
+  scraper.worker.js` decrypts `auto_fetch_raw_headers` (via `crypto.js`'s existing `decryptPassword`, legacy-
+  passthrough-safe) immediately before its existing `JSON.parse`. Zero schema change. Live audit of all 3
+  real users before migrating: 2 had never connected LinkedIn (empty), 1 had a genuinely live plaintext
+  session (152/24/610-char fields) — that's the one needing the one-time re-encrypt migration after deploy.
+- **2026-08-31 — LOCKED DECISION (reverses same-day earlier call): Gemini stays on the free tier until the
+  first paying user, not enabled pre-emptively.** Operator: "I'll add Gemini the moment we get our first
+  paying user. At that moment I'll create a project in Google Console... I will create a project with the
+  name KoneHireSoft HKEY" (verbatim, spelling unconfirmed — check with operator before using anywhere).
+  ClickUp `86eyrwqfj` updated with the reversal + a 5-step runbook for that moment (new GCP project → enable
+  billing → new key → swap `GEMINI_API_KEY` in backend `.env`/Vercel → re-probe the daily quota before
+  trusting it), priority dropped from urgent to normal. Until then: keep AI-write conservative (main role is
+  already on manual/template mode, see `86eyrvk8d`) so the 20/day free cap doesn't blow silently.
+- **2026-08-31 — MVP-readiness assessment given (no code changed).** Operator asked how far from a
+  closed-loop MVP they could publicly claim (LinkedIn post, no demo video). Answer: the loop itself — scrape
+  → match → send → follow-up → reply-detect → credit-meter → admin-oversee — is technically complete and
+  live (Phase 1: 19/21 shipped, Phase 2: 3/3, Phase 3: 6/9). Two real gaps flagged before charging money
+  publicly, both still Claude-suggested/not yet explicitly asked for: **legal** (ToS + Privacy Policy,
+  `86eyrp54p`, high) and **email deliverability** (SPF/DKIM/domain warm-up, `86eyrp54r`, high) — scope for
+  the latter needs checking against the fact users send through their OWN SMTP accounts
+  (`automailsend_smtp_accounts`), not a platform-controlled domain, so it may be lighter than a from-scratch
+  build. Not blocking at hand-picked 3-5 users, safe to defer: anti-abuse dedup (`86eyrp545`), per-user rate
+  limiting (`86eyrp542`), the broken GitHub Actions auto-deploy (`86eyrjwg7`, ops-only). Payment collection
+  itself needs no new code — admin panel already lets the operator manually grant credits after payment
+  collected by any external means (bank transfer, Stripe link, etc.); self-serve checkout was never in scope.
 - **2026-08-31 — DONE: Dual credit system (app_credits + ai_credits) + automated follow-up emails (MVP
   push).** Operator is pushing toward a real launch — 3-5 paying users, 25-50 emails/day each. New
   `app_credits` (default 2000, existing users confirmed migrated to 2000 not 0) is spent on EVERY send

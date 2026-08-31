@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import toast from "react-hot-toast";
 import type { AutoFetchConfig, RoleDef } from "@/lib/types";
 import { HelpTooltip } from "./HelpTooltip";
+import { supabase } from "@/lib/supabase";
 
 type Props = {
   config: AutoFetchConfig;
@@ -86,12 +87,21 @@ export function AutoFetchModal({ config, roleDefs, onSave, onClose, minFetchInte
 
   async function handleSave() {
     const finalConfig = buildConfig();
-    if (finalConfig.enabled) {
+    // Round-trip through /api/verify-linkedin whenever there's a live connection to persist — not just
+    // when Enabled is checked (foundation-hardening pass, 2026-08-31 follow-up). The old "only if enabled"
+    // gate meant unchecking Enabled and clicking Save would write local state's plaintext straight back
+    // over an already-encrypted DB row (only handleConnect's own auto-save went through encryption). The
+    // route now both verifies AND returns ciphertext to persist, so this covers both jobs at once.
+    if (finalConfig.liAt) {
       setSaving(true);
       try {
+        const { data: { session } } = await supabase.auth.getSession();
         const res = await fetch("/api/verify-linkedin", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            ...(session ? { Authorization: `Bearer ${session.access_token}` } : {}),
+          },
           body: JSON.stringify({ liAt: finalConfig.liAt, jsessionid: finalConfig.jsessionid, rawHeaders: finalConfig.rawHeaders }),
         });
         const data = await res.json();
@@ -100,6 +110,9 @@ export function AutoFetchModal({ config, roleDefs, onSave, onClose, minFetchInte
           setSaving(false);
           return;
         }
+        finalConfig.liAt = data.encryptedLiAt;
+        finalConfig.jsessionid = data.encryptedJsessionid;
+        finalConfig.rawHeaders = data.encryptedRawHeaders ?? finalConfig.rawHeaders;
       } catch {
         toast.error("Network error validating your LinkedIn connection");
         setSaving(false);
@@ -120,11 +133,11 @@ export function AutoFetchModal({ config, roleDefs, onSave, onClose, minFetchInte
     }
     setConnecting(true);
 
-    const handleResponse = (e: any) => {
+    const handleResponse = async (e: any) => {
       window.removeEventListener("AUTOMAILEXT_RECEIVE_COOKIE", handleResponse);
-      setConnecting(false);
       const data = e.detail;
       if (!data?.success || !data.jsessionid || !data.li_at) {
+        setConnecting(false);
         toast.error(data?.error || "Couldn't connect — make sure you're logged into LinkedIn in this browser.");
         return;
       }
@@ -148,16 +161,40 @@ export function AutoFetchModal({ config, roleDefs, onSave, onClose, minFetchInte
       setConnectedUsername(data.username && data.username !== "LinkedIn User" ? data.username : null);
 
       // Auto-save immediately — connecting IS the action here, no separate "Save" step (operator ask:
-      // "automatically fills that information into the database... will automatically be updated").
-      onSave(
-        buildConfig({
-          liAt: data.li_at,
-          jsessionid: cleanJsession,
-          rawHeaders: headersJson,
-          enabled: hasKeywords, // auto-activate once connected, same as before, still gated on keywords existing
-        })
-      );
-      toast.success(data.username && data.username !== "LinkedIn User" ? `LinkedIn connected — welcome, ${data.username}!` : "LinkedIn connected!");
+      // "automatically fills that information into the database... will automatically be updated"). Now
+      // routes through /api/verify-linkedin first (foundation-hardening pass) so what actually gets
+      // persisted is ciphertext, not the raw plaintext session straight from the extension — real, worth-
+      // flagging behavior change: Connect now needs one successful server round trip before it saves
+      // (previously instant/local-only), which also means a bad extraction is now caught immediately.
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        const res = await fetch("/api/verify-linkedin", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...(session ? { Authorization: `Bearer ${session.access_token}` } : {}),
+          },
+          body: JSON.stringify({ liAt: data.li_at, jsessionid: cleanJsession, rawHeaders: headersJson }),
+        });
+        const verifyData = await res.json();
+        if (!res.ok || !verifyData.success) {
+          toast.error(verifyData.error || "Couldn't verify your LinkedIn connection — try again.");
+          return;
+        }
+        onSave(
+          buildConfig({
+            liAt: verifyData.encryptedLiAt,
+            jsessionid: verifyData.encryptedJsessionid,
+            rawHeaders: verifyData.encryptedRawHeaders,
+            enabled: hasKeywords, // auto-activate once connected, same as before, still gated on keywords existing
+          })
+        );
+        toast.success(data.username && data.username !== "LinkedIn User" ? `LinkedIn connected — welcome, ${data.username}!` : "LinkedIn connected!");
+      } catch {
+        toast.error("Network error verifying your LinkedIn connection — try again.");
+      } finally {
+        setConnecting(false);
+      }
     };
 
     window.addEventListener("AUTOMAILEXT_RECEIVE_COOKIE", handleResponse);

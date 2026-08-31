@@ -7,6 +7,7 @@ const { roleHasCriteria, computeAlgorithmicMatch, shouldEscalateToAI } = require
 const { ExecutionLogger } = require("../lib/logger");
 const { getGlobalSettings } = require("../lib/globalSettings");
 const { spendAiCredit } = require("../lib/aiCredits");
+const { decryptPassword } = require("../lib/crypto");
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -99,9 +100,16 @@ async function processJobLogic(job, logger, mappings, aiEnabled, aiCredits, aiTe
 
   let headers;
   try {
-    headers = typeof auto_fetch_raw_headers === 'string' 
-      ? JSON.parse(auto_fetch_raw_headers) 
+    // auto_fetch_raw_headers may be "enc:"-prefixed ciphertext (foundation-hardening pass, 2026-08-31
+    // follow-up — this blob is the real LinkedIn session credential, was plaintext at rest before this)
+    // or still a plain JSON string for a row that hasn't been re-saved since. decryptPassword() passes
+    // non-"enc:"-prefixed text through unchanged, so this is safe either way.
+    const rawHeadersPlain = typeof auto_fetch_raw_headers === 'string'
+      ? decryptPassword(auto_fetch_raw_headers)
       : auto_fetch_raw_headers;
+    headers = typeof rawHeadersPlain === 'string'
+      ? JSON.parse(rawHeadersPlain)
+      : rawHeadersPlain;
     await logger.append("SUCCESS", "Parsed Headers Successfully");
   } catch (err) {
     await logger.append("ERROR", `Failed to parse raw headers: ${err.message}`);
