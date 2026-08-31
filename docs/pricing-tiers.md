@@ -1,18 +1,16 @@
 # Candidate pricing tiers (spec)
 
-> ClickUp `86eyrp54a`. **Spec only — operator decision (2026-08-26): no self-serve signup/payment build
-> yet.** Accounts stay admin-created; tiers below are *presets an admin applies* using the same manual
-> override columns that already exist (see [architecture.md](architecture.md)'s "Manual per-user plan
-> overrides" section), not a new billing system. Candidate-side only — recruiter/AI-ATS tiers
-> (`ats_ai_credits`) are a natural follow-up, out of scope here.
->
-> **The $ price points and credit counts below are illustrative, not final** (operator, 2026-08-31): "I
-> just want you to lay the foundation and we will decide on pricing and credits and all these things later
-> once we get all things running. I will mainly check what the price is to me, what it is costing me, and
-> how much margin I want to keep." Final numbers get set once real per-user cost data exists at volume (the
-> AI/infra cost ledger — `automailsend_ai_usage_log`/`automailsend_infra_usage_log`, shipped 2026-08-29 —
-> is exactly what that decision will be based on) and the operator has picked a target margin. Don't treat
-> the table below as locked-in pricing when revisiting this.
+> ClickUp `86eyrp54a`. **Superseded 2026-08-31 — real billing now exists** (Lemon Squeezy, shipped same
+> day, `plan_tier` column live) — the "no self-serve payment build yet" framing below is stale; kept for
+> the grounding facts, which still hold. **Live decision, same day**: three tiers — Starter / Pro / a third
+> tier (name TBD) — each a base subscription *plus* pay-as-you-go credits on top (hybrid, not flat
+> per-tier allotments only). Real margin targets given: **Starter 50%, Pro 45%, third tier 40%** on the
+> subscription price; **50% on pay-as-you-go credits** (cost $0.02/credit → price $0.04/credit, confirmed
+> math: `(0.04-0.02)/0.04 = 50%`). Cost basis: **~$10/month/user** (operator's own breakdown: ~$5
+> infra/credits + ~$5 branding/marketing allocation) — **whether this $10 is flat across all three tiers or
+> scales up for Pro/the third tier (which include more credits/keywords/fetch-frequency, so plausibly cost
+> more to serve) is still open** — the price ladder doesn't come out sensibly assuming a flat $10 (see
+> below), so this needs the operator's call before the actual $ price points can be finalized.
 
 ## Grounding facts (verified, not assumed)
 
@@ -82,7 +80,38 @@ and can ship independently whenever it's wanted. Not built as part of this spec-
 
 ## Explicitly out of scope
 
-- Self-serve signup/payment (Stripe or otherwise) — per the operator's 2026-08-26 decision.
 - Recruiter-side / AI-ATS tiers (`ats_ai_credits`) — separate future spec.
 - Wiring `allowed_products` to actually gate features (e.g. hiding Automail from Free accounts in the UI).
 - A credit auto-refill/reset job.
+
+## Pay-as-you-go credits (2026-08-31 decision — fully specified, ready to implement)
+
+Base subscription tiers grant a starting credit balance (today's `ai_credits`/`app_credits` columns);
+running out doesn't block sending — the user can buy more, priced with a locked 50% margin:
+
+| | Our cost | User price | Margin |
+|---|---|---|---|
+| Per credit (PAYG top-up) | $0.02 | **$0.04** | 50% |
+
+This needs: a Lemon Squeezy one-time-purchase product (not a subscription) per credit pack size (e.g. 100/
+500/1000 credits), a webhook handler variant that tops up `app_credits`/`ai_credits` directly instead of
+touching `plan_tier` (the existing subscription webhook only handles recurring `data.type === "subscriptions"`
+events — a PAYG purchase is a one-time order, a different Lemon Squeezy event shape, not yet handled), and a
+"Buy more credits" entry point in `BillingCard.tsx`. Not yet built.
+
+## Subscription tiers (2026-08-31 decision — structure locked, $ price points pending one clarification)
+
+Three tiers, each base subscription + the PAYG credits above stacked on top:
+
+| | **Starter** | **Pro** | **[third tier — name TBD]** |
+|---|---|---|---|
+| Target margin | 50% | 45% | 40% |
+| Price | `cost / (1 − 0.50)` | `cost / (1 − 0.45)` | `cost / (1 − 0.40)` |
+
+**Blocked on**: whether each tier's "cost to serve" is the same ~$10/mo or scales up per tier. Flat $10
+across all three actually produces a *falling* price ladder (Starter $20 → Pro $18.18 → third tier
+$16.67) since a bigger discount (lower margin %) on a flat cost means a lower price — the opposite of a
+normal ascending SaaS ladder. That only resolves sensibly if cost scales with what each tier includes
+(more `ai_credits`/`app_credits`/keyword headroom/fetch frequency → a higher real cost to serve) — e.g.
+something like Starter $10 / Pro $18 / third tier $30 would produce a properly ascending $20 / $32.73 /
+$50 ladder. Needs the operator's actual per-tier cost estimate, not a guess, before locking these numbers.
