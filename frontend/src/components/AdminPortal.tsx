@@ -23,6 +23,12 @@ type UserState = {
   // account behaves exactly like every other one. See supabase_setup.sql's section for the full reasoning.
   max_keywords: number | null;
   min_fetch_interval_override: number | null;
+  // Lemon Squeezy subscription (2026-08-31) — webhook-only-writable (never accepted by this route's POST
+  // handler), read-only display here. plan_tier always has a real value; the other two are null until a
+  // user has ever had a subscription.
+  plan_tier: "free" | "pro" | "premium";
+  subscription_status: string | null;
+  current_period_ends_at: string | null;
   created_at: string;
 };
 
@@ -334,6 +340,7 @@ export function AdminPortal({ role }: Props) {
                   <th style={{ padding: "0.75rem 0.5rem" }}>User ID</th>
                   <th style={{ padding: "0.75rem 0.5rem" }}>Joined</th>
                   <th style={{ padding: "0.75rem 0.5rem" }}>Status</th>
+                  <th style={{ padding: "0.75rem 0.5rem" }}>Plan</th>
                   <th style={{ padding: "0.75rem 0.5rem" }}>App Credits</th>
                   <th style={{ padding: "0.75rem 0.5rem" }}>AI Credits</th>
                   <th style={{ padding: "0.75rem 0.5rem" }}>ATS Credits</th>
@@ -354,6 +361,9 @@ export function AdminPortal({ role }: Props) {
                       ) : (
                         <span className="badge ok">Active</span>
                       )}
+                    </td>
+                    <td style={{ padding: "0.75rem 0.5rem" }}>
+                      <PlanCell tier={u.plan_tier} status={u.subscription_status} endsAt={u.current_period_ends_at} />
                     </td>
                     <td style={{ padding: "0.75rem 0.5rem" }}>
                       <CreditsCell
@@ -425,6 +435,23 @@ export function AdminPortal({ role }: Props) {
 
       {viewUser && (
         <UserDetailsModal user={viewUser} onClose={() => setViewUser(null)} />
+      )}
+    </div>
+  );
+}
+
+// Read-only — no editable cell needed here, unlike CreditsCell/OverrideCell (2026-08-31). plan_tier/
+// subscription_status/current_period_ends_at are webhook-only-writable (see admin/users/route.ts's POST
+// handler), so admin edits can never desync them from what Lemon Squeezy actually reports.
+function PlanCell({ tier, status, endsAt }: { tier: "free" | "pro" | "premium"; status: string | null; endsAt: string | null }) {
+  const label = tier === "free" ? "Free" : tier === "pro" ? "Pro" : "Premium";
+  const dateLabel = endsAt ? new Date(endsAt).toLocaleDateString() : null;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: "0.15rem" }}>
+      <span className={tier === "free" ? "badge warn" : "badge ok"}>{label}</span>
+      {status === "cancelled" && dateLabel && <span className="hint compact">ends {dateLabel}</span>}
+      {status && status !== "cancelled" && status !== "active" && (
+        <span className="hint compact">{status}{dateLabel ? ` · ${dateLabel}` : ""}</span>
       )}
     </div>
   );

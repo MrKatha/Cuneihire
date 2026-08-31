@@ -184,6 +184,10 @@ export default function Home() {
   // same behavior as every other account. See storage.ts's PersistedState comment.
   const [maxKeywords, setMaxKeywords] = useState(defaultState().maxKeywords);
   const [minFetchIntervalOverride, setMinFetchIntervalOverride] = useState(defaultState().minFetchIntervalOverride);
+  // Lemon Squeezy subscription (2026-08-31) — webhook-granted, read-only from here. See storage.ts.
+  const [planTier, setPlanTier] = useState(defaultState().planTier);
+  const [subscriptionStatus, setSubscriptionStatus] = useState(defaultState().subscriptionStatus);
+  const [currentPeriodEndsAt, setCurrentPeriodEndsAt] = useState(defaultState().currentPeriodEndsAt);
   // Automation's daily-limit ceiling, shown on JAMS's Overview sub-tab (2026-08-25) — admin-configurable,
   // one global number for now (no billing/plan system yet). Public route, no auth needed, same as
   // allow_signups on the signup page.
@@ -324,6 +328,9 @@ export default function Home() {
       setAppCredits(saved.appCredits);
       setMaxKeywords(saved.maxKeywords);
       setMinFetchIntervalOverride(saved.minFetchIntervalOverride);
+      setPlanTier(saved.planTier);
+      setSubscriptionStatus(saved.subscriptionStatus);
+      setCurrentPeriodEndsAt(saved.currentPeriodEndsAt);
       setRoleDefs(saved.roleDefs);
       setSmtpAccounts(saved.smtpAccounts);
       setSending(saved.batchSendPending);
@@ -568,6 +575,9 @@ export default function Home() {
         appCredits, // not saved in app_state — admin-granted, read-only from here
         maxKeywords, // not saved in app_state — admin-granted, read-only from here
         minFetchIntervalOverride, // not saved in app_state — admin-granted, read-only from here
+        planTier, // not saved in app_state — webhook-granted, read-only from here
+        subscriptionStatus, // not saved in app_state — webhook-granted, read-only from here
+        currentPeriodEndsAt, // not saved in app_state — webhook-granted, read-only from here
         profile,
         batchSendPending: sending,
       }).then(() => {
@@ -1117,6 +1127,9 @@ export default function Home() {
               onNewPasswordChange={setNewPassword}
               passwordLoading={passwordLoading}
               onPasswordChangeSubmit={handlePasswordChange}
+              planTier={planTier}
+              subscriptionStatus={subscriptionStatus}
+              currentPeriodEndsAt={currentPeriodEndsAt}
             />
           )}
 

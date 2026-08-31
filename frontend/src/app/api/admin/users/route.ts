@@ -40,6 +40,12 @@ export async function GET(req: Request) {
           app_credits: 0,
           max_keywords: null,
           min_fetch_interval_override: null,
+          // Lemon Squeezy subscription (2026-08-31) — webhook-only-writable, deliberately absent from this
+          // route's POST handler below so an admin edit can never desync these from what Lemon Squeezy
+          // actually reports. select("*") already returns the real columns for a user who has one.
+          plan_tier: "free",
+          subscription_status: null,
+          current_period_ends_at: null,
           ...state,
           user_id: u.id,
           email: u.email || "",

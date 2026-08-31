@@ -54,6 +54,13 @@ export type PersistedState = {
   // account" — see supabase_setup.sql's section for the full reasoning.
   maxKeywords: number | null;
   minFetchIntervalOverride: number | null;
+  // Lemon Squeezy subscription (2026-08-31, foundation hardening) — webhook-granted, read-only from here,
+  // same "not written back by saveAppState" precedent as aiCredits/appCredits above. planTier always has a
+  // real value ('free' is genuine, not "unset"); subscriptionStatus/currentPeriodEndsAt are null only for
+  // a free account that's never had a subscription at all.
+  planTier: "free" | "pro" | "premium";
+  subscriptionStatus: string | null;
+  currentPeriodEndsAt: string | null;
   profile: CandidateProfile;
   batchSendPending: boolean;
 };
@@ -96,6 +103,9 @@ export function defaultState(): PersistedState {
     appCredits: 0,
     maxKeywords: null,
     minFetchIntervalOverride: null,
+    planTier: "free",
+    subscriptionStatus: null,
+    currentPeriodEndsAt: null,
     // Loaded/saved separately via loadCandidateProfile/saveCandidateProfile (its own table, own section
     // below) — not part of the app_state round trip any more. Kept here only as the field's shape default.
     profile: emptyCandidateProfile(),
@@ -190,6 +200,9 @@ export async function loadState(userId: string): Promise<PersistedState> {
     state.appCredits = appState.app_credits ?? 0;
     state.maxKeywords = appState.max_keywords ?? null;
     state.minFetchIntervalOverride = appState.min_fetch_interval_override ?? null;
+    state.planTier = (appState.plan_tier as PersistedState["planTier"]) || "free";
+    state.subscriptionStatus = appState.subscription_status ?? null;
+    state.currentPeriodEndsAt = appState.current_period_ends_at ?? null;
     // profile is no longer read from app_state — see loadCandidateProfile below. The old candidate_*
     // columns here are left in place, unused, same precedent as every other superseded column this
     // project (delay_sec / old ai_prompt / app_state.config — see supabase_setup.sql section 27).

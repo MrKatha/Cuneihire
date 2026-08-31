@@ -959,3 +959,28 @@ alter table public.automailsend_sent_log
 create index if not exists idx_automailsend_recipients_followup_due
   on public.automailsend_recipients (user_id, next_follow_up_at)
   where has_replied = false and status = 'sent';
+
+-- Lemon Squeezy subscriptions (2026-08-31, foundation-hardening Workstream B) — real recurring billing.
+-- Chosen over Stripe/Paddle specifically for confirmed Pakistan-seller support. Layers on top of, does not
+-- replace, the existing 4 manual admin-override levers (ai_credits, max_keywords,
+-- min_fetch_interval_override, daily_mail_limit) or is_blocked/allowed_products — an admin can still hand-
+-- override any user regardless of subscription state via the existing CreditsCell/OverrideCell controls
+-- (see frontend/src/app/api/billing/webhook/route.ts for the exact rule: only a genuine tier-change event
+-- touches the 4 lever columns, every other webhook delivery leaves them alone). plan_tier defaults to
+-- 'free' (every account genuinely has a tier — unlike the override columns above, this isn't a "null means
+-- unset" column). subscription_status mirrors Lemon Squeezy's own status enum verbatim so the webhook
+-- handler never invents its own vocabulary. ls_synced_at stores the subscription object's own updated_at
+-- (not our write time) so the webhook handler can detect and skip stale/duplicate redeliveries. See
+-- docs/pricing-tiers.md for the tier -> lever-value mapping and docs/architecture.md for the full design.
+alter table public.automailsend_app_state
+  add column if not exists ls_customer_id text,
+  add column if not exists ls_subscription_id text,
+  add column if not exists subscription_status text, -- active | on_trial | paused | past_due | unpaid | cancelled | expired
+  add column if not exists plan_tier text not null default 'free', -- 'free' | 'pro' | 'premium'
+  add column if not exists current_period_ends_at timestamp with time zone,
+  add column if not exists ls_synced_at timestamp with time zone;
+
+-- Webhook lookups for events tied to an existing subscription (renewal, cancellation) arrive without a
+-- fresh checkout's custom_data.user_id — resolved via this instead.
+create index if not exists idx_automailsend_app_state_ls_subscription
+  on public.automailsend_app_state (ls_subscription_id);

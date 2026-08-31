@@ -2,6 +2,7 @@
 
 import { EmailConfigTab } from "./EmailConfigTab";
 import { TwoFactorSettings } from "./TwoFactorSettings";
+import { BillingCard } from "./BillingCard";
 import {
   autoFetchLinkedInConnected,
   type AutoFetchConfig,
@@ -48,6 +49,10 @@ type Props = {
   onNewPasswordChange: (value: string) => void;
   passwordLoading: boolean;
   onPasswordChangeSubmit: (e: React.FormEvent) => void;
+  // Lemon Squeezy subscription (2026-08-31) — webhook-granted, read-only, see storage.ts's PersistedState.
+  planTier: "free" | "pro" | "premium";
+  subscriptionStatus: string | null;
+  currentPeriodEndsAt: string | null;
 };
 
 function Card({ title, action, children }: { title: string; action?: React.ReactNode; children: React.ReactNode }) {
@@ -89,6 +94,9 @@ export function SettingsTab({
   onNewPasswordChange,
   passwordLoading,
   onPasswordChangeSubmit,
+  planTier,
+  subscriptionStatus,
+  currentPeriodEndsAt,
 }: Props) {
   const readyAccounts = smtpAccounts.filter((a) => a.isVerified && a.isActive);
   const linkedInConnected = autoFetchLinkedInConnected(autoFetch);
@@ -180,6 +188,10 @@ export function SettingsTab({
         ) : (
           <p className="hint compact" style={{ margin: 0 }}>No default resume set yet — build or upload one on the Resumes tab.</p>
         )}
+      </Card>
+
+      <Card title="Billing">
+        <BillingCard planTier={planTier} subscriptionStatus={subscriptionStatus} currentPeriodEndsAt={currentPeriodEndsAt} />
       </Card>
 
       <Card title="Account">

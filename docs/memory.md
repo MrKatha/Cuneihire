@@ -2,6 +2,31 @@
 
 Newest on top. Terse bullets only — done / in-progress / locked decisions / open items. Update every phase.
 
+- **2026-08-31 — DONE (code): Lemon Squeezy real subscriptions (foundation-hardening Workstream B). BLOCKED
+  on operator provisioning before it's actually live.** Operator: "the payment matters, the subscriptions,
+  how we are gonna cut the subscription" — real recurring billing was entirely missing (credits were 100%
+  admin-granted). Chose Lemon Squeezy over Stripe/Paddle after live research this session: Stripe has zero
+  Pakistan support without a foreign entity, Paddle's Pakistan-seller support was genuinely conflicting
+  across sources, Lemon Squeezy's was consistently confirmed (bank-wire payout, no PayPal for individuals
+  there). New `automailsend_app_state` columns (`plan_tier` default `'free'`, `subscription_status`,
+  `ls_customer_id`/`ls_subscription_id`/`ls_synced_at`, `current_period_ends_at`) applied live, verified via
+  `information_schema`. `TIER_LEVERS` (`frontend/src/lib/lemonSqueezy.ts`) reuses `docs/pricing-tiers.md`'s
+  already-designed Free/Pro/Premium → lever-value table verbatim — first real code wiring for a spec that
+  had sat unused since 2026-08-29. 3 new routes (`/api/billing/{checkout,webhook,portal}`) + `BillingCard.tsx`
+  in Settings + a read-only "Plan" column in `AdminPortal.tsx`. Webhook handler stress-tested for 4 real
+  edge cases (idempotency/replay, admin-override survival across non-tier-change events, cancellation riding
+  out the paid period per Lemon Squeezy's own semantics, immediate mid-cycle downgrade) — see
+  docs/architecture.md's "Lemon Squeezy subscriptions" section for the exact rules. Verified without live LS
+  credentials (none exist yet): HMAC signature verification + idempotency date logic round-tripped in a
+  standalone Node script; the DB-side tier-change vs. override-survival logic verified against a real
+  (restored) row via direct Supabase writes. **Not yet live** — needs the operator to create the Lemon
+  Squeezy store + Pro/Premium products/variants and supply `LEMONSQUEEZY_{API_KEY,STORE_ID,WEBHOOK_SECRET,
+  VARIANT_ID_PRO,VARIANT_ID_PREMIUM}` (two places: `frontend/.env.local` + Vercel project env, same pattern
+  as `GEMINI_API_KEY`) before a real checkout/webhook can be exercised end-to-end. Also shipped in this same
+  pass: baseline security response headers (`next.config.ts` — X-Content-Type-Options/X-Frame-Options/
+  Referrer-Policy; a hand-rolled CSP is a deliberate, flagged scope cut, not attempted).
+  **Also this session**: reversed an earlier same-day Gemini-billing decision back to "wait for the first
+  paying user" (see the entry below) — the operator's own words, not a contradiction to flag later.
 - **2026-08-31 — DONE: fixed a real plaintext-credential-at-rest bug (foundation-hardening Workstream A).**
   Operator pushed back on an MVP-gap assessment that skipped security/payment architecture entirely; auditing
   found `docs/rules.md`'s claim that the AES-256-GCM scheme covers "SMTP passwords, LinkedIn session cookie"

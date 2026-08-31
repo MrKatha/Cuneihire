@@ -290,6 +290,63 @@ null — that alone enforces the cap, no separate "exhausted" flag. AI-written f
 `generateFollowUpEmail` in `ai.service.js` (parallel to `generateAiPersonalizedEmail`), given the recipient's
 most recent `sent_log` row as "what was already said" so it writes a genuine continuation, not a repeat.
 
+## Credentials at rest: LinkedIn session encryption (2026-08-31, foundation hardening)
+Operator raised whether the app's own security was actually sound — auditing found `docs/rules.md`'s claim
+that the existing AES-256-GCM scheme (`frontend/src/lib/crypto.ts` / `backend/src/lib/crypto.js`,
+`enc:iv:authTag:data` format) covers "SMTP passwords, LinkedIn session cookie" was only half true: SMTP
+passwords genuinely are encrypted (`verify/route.ts` encrypts on save, `smtpPool.js`/`imapPool.js` decrypt
+only at connection-build time), the LinkedIn session was not. `automailsend_app_state.cookie_li_at` /
+`.cookie_jsessionid` / `.auto_fetch_raw_headers` (the last one is what actually drives live scraping — see
+`scraper.worker.js`) is a complete, working LinkedIn session with no password/MFA needed to use it. Fixed by
+mirroring the SMTP pattern exactly: `frontend/src/app/api/verify-linkedin/route.ts` (gained an auth gate it
+never had) decrypts-if-needed before pinging LinkedIn, then returns `encrypted{LiAt,Jsessionid,RawHeaders}`
+for the caller to persist. Both write paths in `AutoFetchModal.tsx` now route through it —
+`handleConnect` previously called `onSave` directly with raw extension plaintext (the actual gap);
+`handleSave` now round-trips whenever there's a live connection to persist, not just when Enabled is
+checked, closing an edge case where toggling Enabled off before Save could silently overwrite an
+already-encrypted row with stale local-state plaintext. `scraper.worker.js` decrypts
+`auto_fetch_raw_headers` immediately before its existing `JSON.parse` (legacy-passthrough-safe via
+`decryptPassword`'s existing "not `enc:`-prefixed? pass through unchanged" behavior). Zero schema change.
+
+## Lemon Squeezy subscriptions (2026-08-31, foundation hardening)
+Real recurring billing, replacing "credits are 100% admin-granted" as the only lever. Chosen over
+Stripe/Paddle specifically for confirmed Pakistan-seller payout support. New nullable columns on
+`automailsend_app_state`: `ls_customer_id`, `ls_subscription_id`, `subscription_status` (mirrors Lemon
+Squeezy's own enum verbatim), `plan_tier` (`'free'|'pro'|'premium'`, defaults `'free'` — unlike the manual
+override columns, this always has a real value, not "unset"), `current_period_ends_at`, `ls_synced_at`
+(the subscription object's own `updated_at`, used for webhook idempotency, not our write time).
+
+**Layers on top of, does not replace,** the existing 4 manual admin-override levers (`ai_credits`,
+`max_keywords`, `min_fetch_interval_override`, `daily_mail_limit` — see "Manual per-user plan overrides"
+above) — `TIER_LEVERS` in `frontend/src/lib/lemonSqueezy.ts` maps each tier to exactly those 4 values,
+lifted verbatim from `docs/pricing-tiers.md`'s already-designed table. `frontend/src/app/api/billing/
+webhook/route.ts` only overwrites `plan_tier` + the 4 levers on a **genuine tier-change event**
+(`subscription_created`, a `subscription_updated` whose resolved tier differs from the stored one, or
+`subscription_expired`) — every other delivery (a routine `subscription_payment_success`, a same-tier
+`subscription_updated`, `subscription_cancelled`) only touches `subscription_status`/
+`current_period_ends_at`/`ls_synced_at`, so an admin's hand-set override on the 4 levers survives anything
+short of an actual plan change. `subscription_cancelled` deliberately does NOT touch `plan_tier` — mirrors
+Lemon Squeezy's own semantics (a cancelled sub rides out its already-paid period); only the later
+`subscription_expired` event triggers the real downgrade to Free. Idempotency: the webhook compares the
+incoming subscription object's own `updated_at` against the stored `ls_synced_at` and skips stale/duplicate
+redeliveries — Lemon Squeezy can and does redeliver.
+
+Three routes: `/api/billing/checkout` (authed, creates a hosted Checkout tagged with `checkout_data.custom.
+user_id` so the webhook can map back to a Supabase user without relying on email matching), `/api/billing/
+webhook` (no session auth — authenticates via `X-Signature` HMAC instead, verified with
+`crypto.timingSafeEqual`; only processes `data.type === "subscriptions"` events, acks and ignores
+payment-lifecycle events which carry a different resource shape and never change `plan_tier` on their own
+anyway), `/api/billing/portal` (authed, returns Lemon Squeezy's own pre-signed Customer Portal URL — the one
+surface where a user cancels/pauses/changes plan/updates payment method; not cached, the signed URL is only
+valid 24h). `BillingCard.tsx` (self-contained, mirrors `TwoFactorSettings.tsx`'s pattern) renders inside a
+new "Billing" card in `SettingsTab.tsx`'s flat card grid.
+
+**Env vars needed** (operator-provisioned, not yet live as of this writing): `LEMONSQUEEZY_API_KEY`,
+`LEMONSQUEEZY_STORE_ID`, `LEMONSQUEEZY_WEBHOOK_SECRET`, `LEMONSQUEEZY_VARIANT_ID_PRO`,
+`LEMONSQUEEZY_VARIANT_ID_PREMIUM` — same two-places pattern (`frontend/.env.local` + Vercel project env) as
+`GEMINI_API_KEY`. Code builds and type-checks against these names regardless; live checkout/webhook
+verification is blocked until the operator creates the Lemon Squeezy store + Pro/Premium products/variants.
+
 ## Quick Send's synchronous path + queued-send feedback (2026-08-18)
 Bulk/per-row sends in the JAMS table go through the backend's polling batch queue
 (`automailsend_app_state.batch_send_pending`/`config.batchMode`/`config.batchTargetIds`, consumed by
