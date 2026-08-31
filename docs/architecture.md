@@ -412,6 +412,57 @@ new "Billing" card in `SettingsTab.tsx`'s flat card grid.
 `GEMINI_API_KEY`. Code builds and type-checks against these names regardless; live checkout/webhook
 verification is blocked until the operator creates the Lemon Squeezy store + Pro/Premium products/variants.
 
+## Staging environment (2026-08-31)
+Operator's own proposal, adopted as-is: separate environments by **branch**, not by repo, to avoid turning
+the existing "two copies of `supabase_setup.sql` must stay byte-identical" fragility into a three-way sync
+problem. A `staging` branch now exists alongside `master`.
+
+- **Frontend**: no new work needed — Vercel already builds a unique preview deployment per branch/PR push;
+  only `master` touches the production Vercel project. Push to `staging` (or open a PR from it) to get a
+  preview URL backed by the staging Supabase project below.
+- **Backend**: a second, independent PM2 process (`auto_apply_linkedin_backend_staging`) on the **same**
+  droplet as production — no second server, matching the "spare server credits, not spare AI credits"
+  constraint. Deployed by `.github/workflows/backend-deploy-staging.yml`, triggered by push to `staging`
+  (paths `backend/**`) or manually (`gh workflow run backend-deploy-staging.yml --ref staging`). It clones
+  into a separate directory (`/srv/ismail_data/auto_apply_linkedin_staging`) reusing whatever git remote/auth
+  the existing production checkout already has configured, so no new git credentials are needed. `backend/
+  .env` is regenerated from GitHub Secrets on every deploy (source of truth = secrets, not server file
+  state) — mirrors production's env shape but points at the staging Supabase project and uses its own
+  `STAGING_ENCRYPTION_KEY` (deliberately not shared with production's, even though nothing sensitive crosses
+  between them). Redis is left on its existing `localhost:6379` default, shared with production — the app has
+  no `REDIS_URL` override in either environment today, so this isn't a new coupling.
+- **Database — the part that actually matters, and the part that's currently BLOCKED (2026-08-31).** This
+  app's entire job is sending real email to real people, so "safe to experiment on" only holds if a broken
+  staging worker physically cannot write to or send through production data — it needs a wholly separate
+  Supabase project, not a shared one. Attempted to provision one ("Job Automation Project - Staging",
+  `refvcrxymtyjhprpckrd` org, `ap-south-1`) via the Management API; blocked by the org's free-plan project
+  cap. Investigated live:
+  - The org's free tier caps active free projects **per member, evaluated across every org that member
+    administers** (the API error names 4 member identities, each capped at 2) — not a simple per-org count.
+    Pausing the existing "UMS" project (Axion UMS's, unrelated to this repo — paused with the operator's
+    explicit go-ahead) did NOT clear the block, even confirmed fully `INACTIVE` and re-tried, because the
+    real ceiling is the plan's included-project allowance, not a transient/stuck state.
+  - Considered **Supabase Branching** as an alternative to a second project — researched live: requires a
+    paid plan (Pro, $25/mo) *and* bills separately on top of that (~$0.01344/branch/hour, not covered by
+    plan compute credits — roughly $9-10/mo per branch left running), and expects schema managed via
+    Supabase's own migration-file CLI workflow rather than this repo's single re-run `supabase_setup.sql`.
+    A real recurring cost and a real conversion, not a quick unlock — **deferred**, not adopted.
+  - **Operator decision (2026-08-31): leave it here for now** — production active, UMS paused, no new
+    staging project. Revisit once either (a) there's a second Supabase account/identity to provision under
+    instead (sidesteps the member-wide cap, needs the operator's own signup — not something the Management
+    API can automate), or (b) a paid plan is worth it anyway (post-revenue, when Branching's cost is easy to
+    justify and the migration-file conversion pays for itself).
+  - **UMS stays paused** as of this writing — resume it (`POST /v1/projects/{ref}/resume`) whenever Axion
+    UMS needs it again; nothing about this decision requires it to stay paused indefinitely.
+- **What's actually usable today, DB piece aside**: the `staging` branch and
+  `.github/workflows/backend-deploy-staging.yml` both exist and are correct — a second PM2 process on the
+  same droplet, self-bootstrapping checkout, `.env` regenerated from GitHub Secrets each deploy. It just has
+  nothing to point at yet: the workflow references `STAGING_SUPABASE_URL`/`STAGING_SUPABASE_ANON_KEY`/
+  `STAGING_SUPABASE_SERVICE_ROLE_KEY`/`STAGING_SUPABASE_PROJECT_REF`/`STAGING_ENCRYPTION_KEY` as GitHub
+  Secrets that don't exist yet — don't trigger it until a staging Supabase project exists and those secrets
+  are set, or the deploy will push a broken `.env`. The frontend side needs nothing further — Vercel's own
+  per-branch preview deployments already work today, independent of this blocker.
+
 ## Quick Send's synchronous path + queued-send feedback (2026-08-18)
 Bulk/per-row sends in the JAMS table go through the backend's polling batch queue
 (`automailsend_app_state.batch_send_pending`/`config.batchMode`/`config.batchTargetIds`, consumed by
