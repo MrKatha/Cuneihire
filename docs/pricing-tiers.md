@@ -2,15 +2,13 @@
 
 > ClickUp `86eyrp54a`. **Superseded 2026-08-31 — real billing now exists** (Lemon Squeezy, shipped same
 > day, `plan_tier` column live) — the "no self-serve payment build yet" framing below is stale; kept for
-> the grounding facts, which still hold. **Live decision, same day**: three tiers — Starter / Pro / a third
-> tier (name TBD) — each a base subscription *plus* pay-as-you-go credits on top (hybrid, not flat
-> per-tier allotments only). Real margin targets given: **Starter 50%, Pro 45%, third tier 40%** on the
-> subscription price; **50% on pay-as-you-go credits** (cost $0.02/credit → price $0.04/credit, confirmed
-> math: `(0.04-0.02)/0.04 = 50%`). Cost basis: **~$10/month/user** (operator's own breakdown: ~$5
-> infra/credits + ~$5 branding/marketing allocation) — **whether this $10 is flat across all three tiers or
-> scales up for Pro/the third tier (which include more credits/keywords/fetch-frequency, so plausibly cost
-> more to serve) is still open** — the price ladder doesn't come out sensibly assuming a flat $10 (see
-> below), so this needs the operator's call before the actual $ price points can be finalized.
+> the grounding facts, which still hold. **LOCKED 2026-08-31**: three paid tiers — **Starter / Pro /
+> Elite** (no $0 tier — the free/lead-gen role moves to the public resume builder, a separate spec), each
+> a base subscription *plus* pay-as-you-go credits on top. Margins: **Starter 50%, Pro 45%, Elite 40%** on
+> the subscription price; **50% on pay-as-you-go credits** (cost $0.02/credit → price $0.04/credit).
+> Cost-to-serve scales per tier (confirmed, not flat): **Starter $10 / Pro $18 / Elite $30 per month** →
+> prices **$20 / $32.73 / $50**. Full table and the credit/keyword numbers under "Subscription tiers
+> (LOCKED)" below.
 
 ## Grounding facts (verified, not assumed)
 
@@ -45,31 +43,25 @@
 | Fetch interval floor | `automailsend_app_state.min_fetch_interval_override` | `null` (uses the 180min global floor) | Fastest allowed LinkedIn Auto-Fetch run interval |
 | Daily send cap | `automailsend_app_state.daily_mail_limit` | 50 | `Math.min(this, global max_daily_send_limit)` — real enforced ceiling |
 
-## Proposed tiers
+## ~~Proposed tiers~~ — superseded by "Subscription tiers (LOCKED)" below
 
-| | **Free** — $0 | **Pro** — ~$15–20/mo | **Premium** — ~$35–45/mo |
-|---|---|---|---|
-| AI credits (initial grant) | 10 | 100 | 300 |
-| Keyword cap | 10 | 30 | Uncapped (`null`) |
-| Fetch interval floor | 180min (global default, no override) | 60min | 15min |
-| Daily send cap | 20 | 75 | 150 |
-
-Exact $ price points are a market call, not a technical one — positioned against comparable AI job-search
-tools (LoopCV, Simplify, AutoApplyMax: free tiers exist; paid tiers cluster $15–30/mo; a premium tier near
-$30–45 shows up on Jobright/AiApply). Adjust freely; the numeric levers are what actually need to be right.
+The original Free/Pro/Premium draft (illustrative $ ranges, no real cost math) is fully replaced by the
+Starter/Pro/Elite table further down, which uses the operator's actual 2026-08-31 cost/margin decision. Kept
+only as history — don't use the numbers above.
 
 ## One real gap this surfaced: the daily-send ceiling doesn't stack cleanly yet
 
 `automail.worker.js` computes the effective daily cap as `Math.min(user.daily_mail_limit, globalDailyLimit)`
 — and `globalDailyLimit` (`automailsend_global_settings.max_daily_send_limit`) is **one platform-wide number,
-currently 100**, not tier-aware. A Premium user's `daily_mail_limit` set to 150 would still be clamped down
-to 100 by that global ceiling. Before Premium's higher daily cap can actually take effect, either:
+currently 100**, not tier-aware. An Elite user's `daily_mail_limit` set to 150 (see the locked tier table
+below) would still be clamped down to 100 by that global ceiling. Before Elite's higher daily cap can
+actually take effect, either:
 - raise the global ceiling to at least the highest tier's value (simplest — it already means "hard safety
   ceiling regardless of tier," so raising it just widens that ceiling), or
 - make the global ceiling itself tier-aware (more invasive, not needed unless the global ceiling is meant to
-  stay meaningfully below Premium's number for its own reason).
+  stay meaningfully below Elite's number for its own reason).
 
-Flagging this now so it isn't discovered by a confused "why isn't my Premium user's send cap working."
+Flagging this now so it isn't discovered by a confused "why isn't my Elite user's send cap working."
 
 ## Suggested (optional) immediate follow-up — not required for this spec
 
@@ -81,7 +73,7 @@ and can ship independently whenever it's wanted. Not built as part of this spec-
 ## Explicitly out of scope
 
 - Recruiter-side / AI-ATS tiers (`ats_ai_credits`) — separate future spec.
-- Wiring `allowed_products` to actually gate features (e.g. hiding Automail from Free accounts in the UI).
+- Wiring `allowed_products` to actually gate features (e.g. hiding Automail from an unsubscribed account).
 - A credit auto-refill/reset job.
 
 ## Pay-as-you-go credits (2026-08-31 decision — fully specified, ready to implement)
@@ -99,19 +91,33 @@ touching `plan_tier` (the existing subscription webhook only handles recurring `
 events — a PAYG purchase is a one-time order, a different Lemon Squeezy event shape, not yet handled), and a
 "Buy more credits" entry point in `BillingCard.tsx`. Not yet built.
 
-## Subscription tiers (2026-08-31 decision — structure locked, $ price points pending one clarification)
+## Subscription tiers (2026-08-31 — LOCKED)
 
-Three tiers, each base subscription + the PAYG credits above stacked on top:
+Three tiers, all paid (no $0 tier any more — the free/lead-gen role moves to the public resume builder
+below), each a base subscription + the PAYG credits above stacked on top. Cost-per-tier confirmed to scale
+with what's included (operator decision, 2026-08-31), not flat:
 
-| | **Starter** | **Pro** | **[third tier — name TBD]** |
+| | **Starter** | **Pro** | **Elite** |
 |---|---|---|---|
+| Cost to serve | $10/mo | $18/mo | $30/mo |
 | Target margin | 50% | 45% | 40% |
-| Price | `cost / (1 − 0.50)` | `cost / (1 − 0.45)` | `cost / (1 − 0.40)` |
+| **Price** (`cost / (1 − margin)`) | **$20/mo** | **$32.73/mo** | **$50/mo** |
+| AI credits (initial grant) | 30 | 100 | 300 |
+| App credits (initial grant) | 500 | 1500 | 4000 |
+| Keyword cap | 10 | 30 | Uncapped (`null`) |
+| Fetch interval floor | 120min | 60min | 15min |
+| Daily send cap | 30 | 75 | 150 |
 
-**Blocked on**: whether each tier's "cost to serve" is the same ~$10/mo or scales up per tier. Flat $10
-across all three actually produces a *falling* price ladder (Starter $20 → Pro $18.18 → third tier
-$16.67) since a bigger discount (lower margin %) on a flat cost means a lower price — the opposite of a
-normal ascending SaaS ladder. That only resolves sensibly if cost scales with what each tier includes
-(more `ai_credits`/`app_credits`/keyword headroom/fetch frequency → a higher real cost to serve) — e.g.
-something like Starter $10 / Pro $18 / third tier $30 would produce a properly ascending $20 / $32.73 /
-$50 ladder. Needs the operator's actual per-tier cost estimate, not a guess, before locking these numbers.
+The cost-to-serve column ($10/$18/$30) is the operator's own estimate, not derived from metered data yet
+— revisit once `automailsend_ai_usage_log`/`automailsend_infra_usage_log` have real per-tier volume to
+confirm it. The $ prices are exact given that cost input and the locked margins; psychological rounding
+(e.g. $19/$32/$49) is a final polish call, not a math one. AI/app-credit, keyword, and interval numbers
+are still positioning calls (unchanged from the original illustrative table) — only the $ price math is
+now backed by real inputs.
+
+**One open implementation question this surfaces, not blocking the numbers above**: every signup still
+defaults `plan_tier` to `'free'` (`supabase_setup.sql`), and nothing currently forces a subscription choice
+before the app is usable. With no $0 product any more, `'free'` needs to become either a time-boxed trial
+state or simply "not yet subscribed, most features locked" — a real product decision for whenever
+`plan_tier` gets wired to actually drive the five enforcement columns (see architecture.md's pipeline
+breakdown). Flagging now so it doesn't get discovered as a bug later.
