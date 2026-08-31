@@ -37,9 +37,11 @@ jobs:
             # section. jobspy.worker.js's own JobSpy-search calls will error with a clear message (surfaced
             # in that user's execution log) until this succeeds, but the rest of the app is unaffected
             # either way -- jobspy_sourcing_enabled defaults to false, so nothing calls this until an
-            # account opts in.
-            (command -v python3 >/dev/null 2>&1 && python3 -m pip install --user -U python-jobspy) \
-              || echo "WARNING: python3/pip not available or install failed -- JobSpy sourcing will error until this is fixed manually on the server."
+            # account opts in. python3 exists on this server by default but python3-pip does not (confirmed
+            # live, 2026-08-31: "No module named pip") -- install it first, also best-effort.
+            (command -v pip3 >/dev/null 2>&1 || sudo apt-get install -y -qq python3-pip) \
+              && (python3 -m pip install --user -U python-jobspy) \
+              || echo "WARNING: python3/pip setup or the python-jobspy install failed -- JobSpy sourcing will error until this is fixed manually on the server."
 
             echo "Restarting PM2 process..."
             pm2 restart auto_apply_linkedin_backend --update-env
