@@ -14,10 +14,22 @@ Newest on top. Terse bullets only — done / in-progress / locked decisions / op
   JobSpy has no CLI), `jobspyBridge.js`, `jobspy.worker.js` (deliberately a SEPARATE self-contained worker,
   not a refactor of `scraper.worker.js`'s `saveContacts` — real duplication accepted to avoid risking the
   live LinkedIn scraper mid-feature in a zero-test-suite repo), 6th scheduler loop, deploy-workflow Python
-  install step (best-effort, never fails the deploy). Build/lint clean, zero new debt. **Pending**: a real
-  local smoke-test scrape against Indeed — `python-jobspy`'s pip install (pandas et al.) is running unusually
-  long locally, not yet confirmed complete as of this entry. Feature ships gated off by default regardless
-  (`jobspy_sourcing_enabled` defaults false), so shipping the code ahead of that final live check is safe.
+  install step (best-effort, never fails the deploy). Build/lint clean, zero new debt.
+  **Update (same day, later): the pending local verification finished, and it did its job — found a real
+  bug before any user hit it.** `python-jobspy`'s local install (stuck ~20+ min on a pandas/numpy source
+  build, this dev machine's Python 3.14 has no prebuilt wheels yet) finally completed. First real smoke
+  test against Indeed (via `jobspyBridge.js`, not just the raw Python script) failed immediately:
+  `jobspy_scrape.py returned invalid JSON: Unexpected token 'N', "..._amount": NaN...`. Root cause: pandas
+  silently coerces `None` back into `NaN` when assigned into a float64 column, so the script's DataFrame-
+  level `df.where(df.notnull(), None)` NaN-scrub never actually worked for `min_amount`/`max_amount` — it
+  only works for object/string columns. Any listing with no salary (the common case) shipped a raw `NaN`,
+  which isn't valid JSON, which made every such listing's whole search silently fail (contained by the
+  existing per-keyword try/catch in `jobspy.worker.js`, so it never crashed the worker loop — but most real
+  listings were being dropped). Fixed with a per-value NaN check (`_clean()`) applied on the way out, since
+  the column-level fix doesn't hold for numeric dtypes. Re-verified end to end after the fix — real Indeed
+  listings now come back clean (`min`/`max` null or a real number, never a bare NaN). Shipped to production
+  (commit `bfa38a0`), deploy confirmed green. Feature is still off by default, but the code path itself is
+  now actually confirmed working, not just deployed.
 - **2026-08-31 — DONE: "is this even a job post?" gate — closes a real false-positive bug the operator hit
   live** (a WhatsApp-automation-tool ad got saved as a contact for matching most of a role's search
   keywords). Root cause: every relevance check (`computeAlgorithmicMatch`/`scoreJobMatch`/exclude-keywords)
