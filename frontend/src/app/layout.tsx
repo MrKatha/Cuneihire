@@ -24,6 +24,7 @@ export const metadata: Metadata = {
 };
 
 import { Toaster } from "react-hot-toast";
+import Link from "next/link";
 
 export default function RootLayout({
   children,
@@ -42,10 +43,17 @@ export default function RootLayout({
             <div>
               &copy; 2026 Cuneihire — built by <a href="https://cuneihive.com" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--accent)' }} className="hover:underline">Cuneihive</a>
             </div>
+            <nav className="flex items-center gap-5">
+              <Link href="/terms" className="hover:underline" style={{ color: 'var(--muted)' }}>Terms</Link>
+              <Link href="/privacy" className="hover:underline" style={{ color: 'var(--muted)' }}>Privacy</Link>
+              <Link href="/refund-policy" className="hover:underline" style={{ color: 'var(--muted)' }}>Refunds</Link>
+              <a href="mailto:help@cuneihive.com" className="hover:underline" style={{ color: 'var(--muted)' }}>Support</a>
+            </nav>
           </div>
           <div className="container mx-auto px-4 mt-4 text-center">
             <p className="text-[10px] opacity-60 max-w-3xl mx-auto" style={{ color: 'var(--muted)' }}>
-              Disclaimer & Privacy: This tool is provided "as is" without warranties of any kind. Any use of this platform for automated messaging or email sending is strictly at your own risk. Cuneihire assumes no liability for account bans, data loss, or misuse of this software.
+              Automated messaging and email sending carry inherent risk (rate-limiting, account restriction,
+              deliverability) and are used at your own risk — see our <Link href="/terms" className="underline">Terms</Link> for the full disclaimer.
             </p>
           </div>
         </footer>

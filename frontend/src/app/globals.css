@@ -485,6 +485,50 @@ body {
   border-color: color-mix(in srgb, var(--danger) 40%, var(--line));
 }
 
+/* Long-form legal/policy pages (Terms, Privacy, Refunds) — plain article typography, no @tailwindcss/
+   typography plugin installed, so this is the one shared block instead of repeating utility classes on
+   every heading/paragraph across three near-identical pages. */
+.legal-doc h2 {
+  font-family: var(--font-display), Georgia, serif;
+  font-size: 1.4rem;
+  font-weight: 600;
+  color: var(--ink);
+  margin: 2.25rem 0 0.75rem;
+  letter-spacing: -0.01em;
+}
+.legal-doc h2:first-child {
+  margin-top: 0;
+}
+.legal-doc h3 {
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: var(--ink);
+  margin: 1.5rem 0 0.5rem;
+}
+.legal-doc p {
+  color: var(--ink);
+  line-height: 1.7;
+  margin: 0 0 1rem;
+}
+.legal-doc ul,
+.legal-doc ol {
+  margin: 0 0 1rem;
+  padding-left: 1.25rem;
+  color: var(--ink);
+  line-height: 1.7;
+}
+.legal-doc li {
+  margin: 0 0 0.4rem;
+}
+.legal-doc a {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.legal-doc strong {
+  font-weight: 600;
+}
+
 .badge {
   display: inline-flex;
   align-items: center;
