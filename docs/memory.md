@@ -2,6 +2,29 @@
 
 Newest on top. Terse bullets only — done / in-progress / locked decisions / open items. Update every phase.
 
+- **2026-08-31 — DONE: pricing LOCKED (Starter/Pro/Elite, $20/$32.73/$50) + JobSpy hard-gated to dev only.**
+  Operator decisions, both shipped: (1) JobSpy/Indeed sourcing now refuses to even start unless
+  `JOBSPY_SOURCING_ENABLED_GLOBALLY=true` (only staging's env sets it — a real code-level boundary, not
+  just a per-user default; the Settings toggle itself is now also hidden outside Vercel Preview via
+  `NEXT_PUBLIC_JOBSPY_SOURCING_AVAILABLE`), deployed to production and confirmed live. (2) Three paid tiers
+  replace the old Free/Pro/Premium draft — no $0 app tier any more (the free/lead-gen role moves to the new
+  public resume builder instead, see below). Margins 50/45/40%, cost-to-serve $10/$18/$30/mo (scales per
+  tier), prices **$20/$32.73/$50**. Pay-as-you-go credits locked at 50% margin ($0.02 cost → $0.04 price).
+  Full table: `docs/pricing-tiers.md`. **Not yet built**: PAYG Lemon Squeezy one-time-purchase product +
+  webhook variant, and wiring `plan_tier` to actually drive the five enforcement columns (still a label
+  only). Also flagged, not yet resolved: every signup still defaults `plan_tier='free'` with no forcing
+  function to subscribe — needs a real decision (time-boxed trial vs. "mostly locked until you subscribe")
+  once that wiring happens.
+- **2026-08-31 — SCOPED, NOT STARTED: public resume builder as a lead-gen/ad funnel** (ClickUp `86eytbf5e`,
+  Phase 4). Operator decision: fully public/unauthenticated builder (reuses the existing authed
+  `ResumeBuilder.tsx`/`automailsend_resume_profiles` logic — Build from profile / Start from scratch /
+  Upload), anonymous drafts live in browser storage, email-gated only at download (creates a lead-only
+  record, confirmed via AskUserQuestion — not a real account), logged-in visitors save into their real
+  library as today. New: a sharper design pass + a live heuristic ATS-friendliness score. Ads: build the
+  page now, but don't apply to any network until the `cuneihire.com` domain exists (~5 days out, confirmed
+  via AskUserQuestion — AdSense-type networks expect a real TLD). Real scope (new public route + SEO, a
+  new leads table + public rate-limited insert endpoint, dual anon/authed builder mode, the ATS algorithm
+  itself) — not started; kickoff pending operator go-ahead.
 - **2026-08-31 — DONE: Terms of Service, Privacy Policy, Refund Policy — the blocking requirement for
   Lemon Squeezy store approval** (`86eyrp54p`, closed). Live: `/terms`, `/privacy`, `/refund-policy`, all
   on a shared `LegalPageShell` component (cross-links, consistent typography, no client JS). Content is
