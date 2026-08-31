@@ -5,6 +5,14 @@
 > override columns that already exist (see [architecture.md](architecture.md)'s "Manual per-user plan
 > overrides" section), not a new billing system. Candidate-side only — recruiter/AI-ATS tiers
 > (`ats_ai_credits`) are a natural follow-up, out of scope here.
+>
+> **The $ price points and credit counts below are illustrative, not final** (operator, 2026-08-31): "I
+> just want you to lay the foundation and we will decide on pricing and credits and all these things later
+> once we get all things running. I will mainly check what the price is to me, what it is costing me, and
+> how much margin I want to keep." Final numbers get set once real per-user cost data exists at volume (the
+> AI/infra cost ledger — `automailsend_ai_usage_log`/`automailsend_infra_usage_log`, shipped 2026-08-29 —
+> is exactly what that decision will be based on) and the operator has picked a target margin. Don't treat
+> the table below as locked-in pricing when revisiting this.
 
 ## Grounding facts (verified, not assumed)
 
