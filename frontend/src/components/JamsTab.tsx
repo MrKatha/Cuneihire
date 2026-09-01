@@ -1,7 +1,6 @@
 "use client";
 
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import { useEffect, useMemo, useRef, useState } from "react";
 import toast from "react-hot-toast";
 import { supabase } from "@/lib/supabase";
 import {
@@ -18,6 +17,9 @@ import {
 } from "@/lib/types";
 import { matchScoreTone, firstUrl } from "@/lib/jobPosts";
 import { StatusPill } from "./JobPostCard";
+import { EmailDetailPanel } from "./EmailDetailPanel";
+
+const PAGE_SIZE = 15;
 
 type Props = {
   userId: string | null;
@@ -40,24 +42,6 @@ type Props = {
 
 function sentKey(email: string, role: Role) {
   return `${email.toLowerCase()}::${role}`;
-}
-
-function formatFriendlyError(errorMsg?: string) {
-  if (!errorMsg) return "Unknown error occurred.";
-  const msg = errorMsg.toLowerCase();
-  if (msg.includes("auth") || msg.includes("credentials") || msg.includes("password") || msg.includes("535")) {
-    return "Invalid email password or app password.";
-  }
-  if (msg.includes("network") || msg.includes("timeout") || msg.includes("econnrefused")) {
-    return "Could not connect to the email server. Please check your internet connection.";
-  }
-  if (msg.includes("rejected") || msg.includes("spam") || msg.includes("bounce")) {
-    return "The recipient's server rejected the email (possibly marked as spam or invalid address).";
-  }
-  if (msg.includes("limit") || msg.includes("quota")) {
-    return "You have reached your email provider's sending limit.";
-  }
-  return "Something went wrong while sending this email.";
 }
 
 // The unified lifecycle hub — every contact found (scraped or manual), with matching context, sending
@@ -93,13 +77,24 @@ export function JamsTab({
   const [filterSource, setFilterSource] = useState("all");
   const [filterRole, setFilterRole] = useState("all");
   const [searchQuery, setSearchQuery] = useState("");
-  const [visibleCount, setVisibleCount] = useState(50);
-  const observerTarget = useRef<HTMLDivElement>(null);
+  // Real pagination (2026-09-01, operator ask — "only 15 emails should be visible on one page"),
+  // replacing the old infinite-scroll IntersectionObserver. `page` is clamped against the current
+  // filtered set below (see `currentPage`), so narrowing a filter can never strand you on a now-empty
+  // page — see that clamp's comment for why there's no separate "reset to page 1" effect.
+  const [page, setPage] = useState(1);
 
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
-  const [expandedErrors, setExpandedErrors] = useState<Set<string>>(new Set());
-  const [previewEmail, setPreviewEmail] = useState<SentRecord | null>(null);
+  // The contact whose full detail (job, send history, follow-ups, replies) is open in the right-side
+  // panel (2026-09-01, operator ask — replaces the old inline expand-row + separate small "preview one
+  // sent email" modal with one consolidated view, opened by clicking the row itself). Stored as an id,
+  // not the row object itself, and re-looked-up from the live `recipients` prop below — so if a reply
+  // comes in or a follow-up sends while the panel is open, it reflects that instead of showing a stale
+  // snapshot from the moment it was opened.
+  const [detailRecipientId, setDetailRecipientId] = useState<string | null>(null);
+  const detailRecipient = useMemo(
+    () => (detailRecipientId ? recipients.find((r) => r.id === detailRecipientId) || null : null),
+    [detailRecipientId, recipients]
+  );
   const [mounted, setMounted] = useState(false);
   useEffect(() => {
     setMounted(true);
@@ -151,14 +146,6 @@ export function JamsTab({
     });
   }
 
-  useEffect(() => {
-    const observer = new IntersectionObserver(
-      (entries) => { if (entries[0].isIntersecting) setVisibleCount((n) => n + 50); },
-      { threshold: 0.1, rootMargin: "200px" }
-    );
-    if (observerTarget.current) observer.observe(observerTarget.current);
-    return () => observer.disconnect();
-  }, []);
 
   useEffect(() => {
     if (sending && expectedTotal.current > 0) {
@@ -188,7 +175,15 @@ export function JamsTab({
     });
   }, [recipients, filterStatus, filterPhoneStatus, filterSource, filterRole, searchQuery]);
 
-  const visible = filtered.slice(0, visibleCount);
+  // No explicit "reset to page 1 on filter change" effect here (that pattern needs either a useEffect,
+  // which this repo's React Compiler lint config flags as a cascading-render risk, or a ref read/write
+  // during render, which the same config disallows outright). Clamping below already guarantees `page`
+  // never points past the end of the current filtered set — the one case that differs from a hard reset
+  // is switching between two filters that both have several pages, which lands you on the same page
+  // *number* under the new filter rather than jumping to page 1. Minor, and correctness-safe either way.
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const visible = filtered.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
 
   function historyFor(r: Recipient) {
     const key = sentKey(r.email, r.role);
@@ -197,24 +192,6 @@ export function JamsTab({
 
   function repliesFor(r: Recipient) {
     return replies.filter((rep) => rep.recipientId === r.id);
-  }
-
-  function toggleExpand(id: string) {
-    setExpandedRows((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }
-
-  function toggleError(key: string) {
-    setExpandedErrors((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
   }
 
   function toggleSelected(id: string) {
@@ -338,9 +315,12 @@ export function JamsTab({
     }
   }
 
+  // Scoped to `filtered`, not just the current page's `visible` — a selection made on page 1 should
+  // still be included in Send/Delete Selected after paging to page 2, matching what the "N selected"
+  // chip (which counts every selected id) implies.
   const selectedRecipients = useMemo(
-    () => visible.filter((r) => selectedIds.has(r.id)),
-    [visible, selectedIds]
+    () => filtered.filter((r) => selectedIds.has(r.id)),
+    [filtered, selectedIds]
   );
 
   return (
@@ -483,206 +463,125 @@ export function JamsTab({
             <tbody>
               {visible.map((r) => {
                 const tone = r.job_post_id ? matchScoreTone(r.match_score) : null;
-                const history = historyFor(r);
-                const contactReplies = repliesFor(r);
-                const isExpanded = expandedRows.has(r.id);
+                const postUrl = firstUrl(r.source_url);
                 const emailStatus = r.status || "pending";
                 return (
-                  <Fragment key={r.id}>
-                    <tr style={{ borderTop: "1px solid var(--line)" }}>
-                      <td style={{ padding: "0.5rem 0.4rem" }}>
-                        <input type="checkbox" checked={selectedIds.has(r.id)} onChange={() => toggleSelected(r.id)} />
-                      </td>
-                      <td style={{ padding: "0.5rem 0.6rem" }}>
-                        <div>{r.email || <span className="hint">No email</span>}</div>
-                        {r.phone && <div className="hint" style={{ margin: 0 }}>{r.phone}</div>}
-                      </td>
-                      <td style={{ padding: "0.5rem 0.6rem" }}>
-                        <span className="chip">{roleLabel(roleDefs, r.role)}</span>
-                        {r.title && <div className="hint" style={{ margin: "0.25rem 0 0" }}>{r.title}</div>}
-                      </td>
-                      <td style={{ padding: "0.5rem 0.6rem" }}>
-                        {tone ? (
-                          <span style={{ color: tone.color, fontWeight: 700, fontSize: "0.75rem" }}>{tone.label}</span>
-                        ) : (
-                          <span className="hint">—</span>
-                        )}
-                        {firstUrl(r.source_url) && (
-                          <div>
-                            <a href={firstUrl(r.source_url)} target="_blank" rel="noopener noreferrer" className="msg" style={{ color: "var(--accent)" }}>
-                              View post ↗
-                            </a>
-                          </div>
-                        )}
-                      </td>
-                      <td style={{ padding: "0.5rem 0.6rem" }}>
-                        <StatusPill status={r.status} />
-                        {r.hasReplied && (
-                          <span className="badge ok" style={{ marginLeft: "0.4rem", fontSize: "0.65rem" }} title="Replied to this outreach">
-                            ↩ Replied{(r.replyCount || 0) > 1 ? ` (${r.replyCount})` : ""}
-                          </span>
-                        )}
-                      </td>
-                      <td style={{ padding: "0.5rem 0.6rem" }}>
-                        {r.phone ? (
-                          <select
-                            value={r.phone_status || "pending"}
-                            onChange={(e) => onUpdateStatus?.(r.id, "phone_status", e.target.value)}
-                            style={{ fontSize: "0.72rem", padding: "0.15rem 0.3rem" }}
+                  <tr
+                    key={r.id}
+                    onClick={() => setDetailRecipientId(r.id)}
+                    style={{ borderTop: "1px solid var(--line)", cursor: "pointer" }}
+                    className="jams-row"
+                  >
+                    <td style={{ padding: "0.5rem 0.4rem" }} onClick={(e) => e.stopPropagation()}>
+                      <input type="checkbox" checked={selectedIds.has(r.id)} onChange={() => toggleSelected(r.id)} />
+                    </td>
+                    <td style={{ padding: "0.5rem 0.6rem" }}>
+                      <div>{r.email || <span className="hint">No email</span>}</div>
+                      {r.phone && <div className="hint" style={{ margin: 0 }}>{r.phone}</div>}
+                    </td>
+                    <td style={{ padding: "0.5rem 0.6rem" }}>
+                      <span className="chip">{roleLabel(roleDefs, r.role)}</span>
+                      {r.title && <div className="hint" style={{ margin: "0.25rem 0 0" }}>{r.title}</div>}
+                    </td>
+                    <td style={{ padding: "0.5rem 0.6rem" }}>
+                      {tone ? (
+                        <span style={{ color: tone.color, fontWeight: 700, fontSize: "0.75rem" }}>{tone.label}</span>
+                      ) : (
+                        <span className="hint">—</span>
+                      )}
+                      {postUrl && (
+                        <div>
+                          <a
+                            href={postUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="msg"
+                            style={{ color: "var(--accent)" }}
+                            onClick={(e) => e.stopPropagation()}
                           >
-                            <option value="pending">Pending</option>
-                            <option value="sent">Msg sent</option>
-                            <option value="wrong_number">Wrong number</option>
-                          </select>
-                        ) : (
-                          <span className="hint">—</span>
-                        )}
-                      </td>
-                      <td style={{ padding: "0.5rem 0.6rem" }}>
-                        <span className="hint" style={{ margin: 0 }}>{r.source === "manual" ? "Manual" : "Auto-fetch"}</span>
-                      </td>
-                      <td style={{ padding: "0.5rem 0.6rem" }}>
-                        <div style={{ display: "flex", gap: "0.3rem", flexWrap: "wrap", alignItems: "center" }}>
-                          {queuedIds.has(r.id) ? (
-                            <span className="hint compact" style={{ display: "inline-flex", alignItems: "center", gap: "0.3rem", color: "var(--accent)" }}>
-                              <span className="spinner-dot" style={{ width: "6px", height: "6px", borderRadius: "50%", background: "var(--accent)", display: "inline-block" }} />
-                              Queued — sending soon…
-                            </span>
-                          ) : emailStatus !== "sent" ? (
-                            <button type="button" className="btn ghost" style={{ fontSize: "0.7rem", padding: "0.15rem 0.4rem" }} disabled={sending} onClick={() => sendList([r], { force: false })}>
-                              Send
-                            </button>
-                          ) : (
-                            <button type="button" className="btn ghost" style={{ fontSize: "0.7rem", padding: "0.15rem 0.4rem" }} disabled={sending} onClick={() => sendList([r], { force: true })}>
-                              Resend
-                            </button>
-                          )}
-                          {(history.length > 0 || contactReplies.length > 0) && (
-                            <button type="button" className="btn ghost" style={{ fontSize: "0.7rem", padding: "0.15rem 0.4rem" }} onClick={() => toggleExpand(r.id)}>
-                              {isExpanded
-                                ? "Hide history ▾"
-                                : `History (${history.length}${contactReplies.length > 0 ? ` · ${contactReplies.length} reply` : ""}) ▸`}
-                            </button>
-                          )}
+                            View post ↗
+                          </a>
                         </div>
-                      </td>
-                    </tr>
-                    {isExpanded && (
-                      <tr style={{ background: "var(--bg-elevated)" }}>
-                        <td></td>
-                        <td colSpan={7} style={{ padding: "0.5rem 0.6rem 0.75rem" }}>
-                          <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem" }}>
-                            {history.map((s, idx) => {
-                              const itemKey = `${r.id}-${s.sentAt}-${idx}`;
-                              const isErrExpanded = expandedErrors.has(itemKey);
-                              return (
-                                <div key={itemKey} style={{ fontSize: "0.75rem", border: "1px solid var(--line)", borderRadius: "6px", padding: "0.4rem 0.6rem" }}>
-                                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "0.5rem" }}>
-                                    <span>
-                                      <span className={`badge ${s.status === "failed" ? "danger" : "ok"}`} style={{ marginRight: "0.5rem" }}>{s.status}</span>
-                                      {new Date(s.sentAt).toLocaleString()}
-                                    </span>
-                                    <span style={{ display: "flex", gap: "0.4rem" }}>
-                                      {(s.subject || s.body) && (
-                                        <button type="button" className="btn ghost" style={{ fontSize: "0.7rem", padding: "0.1rem 0.4rem" }} onClick={() => setPreviewEmail(s)}>
-                                          Preview
-                                        </button>
-                                      )}
-                                      {s.status === "failed" && (
-                                        <button type="button" className="btn ghost" style={{ fontSize: "0.7rem", padding: "0.1rem 0.4rem" }} onClick={() => toggleError(itemKey)}>
-                                          {isErrExpanded ? "Hide reason" : "Why?"}
-                                        </button>
-                                      )}
-                                    </span>
-                                  </div>
-                                  {(s.templateLabel || s.resumeLabel) && (
-                                    <div style={{ marginTop: "0.3rem", fontSize: "0.68rem", color: "var(--muted)" }}>
-                                      {s.templateLabel && <>Template: <strong>{s.templateLabel}</strong></>}
-                                      {s.templateLabel && s.resumeLabel && "  ·  "}
-                                      {s.resumeLabel && <>Resume: <strong>{s.resumeLabel}</strong></>}
-                                    </div>
-                                  )}
-                                  {s.status === "failed" && isErrExpanded && (
-                                    <div style={{ marginTop: "0.35rem", color: "var(--danger)" }}>
-                                      {formatFriendlyError(s.error)}
-                                      {s.error && <div style={{ fontSize: "0.65rem", opacity: 0.7, marginTop: "0.2rem", wordBreak: "break-all" }}>Technical info: {s.error}</div>}
-                                    </div>
-                                  )}
-                                </div>
-                              );
-                            })}
-                            {contactReplies.length > 0 && (
-                              <>
-                                <div style={{ fontSize: "0.7rem", color: "var(--muted)", fontWeight: 600, marginTop: history.length > 0 ? "0.3rem" : 0 }}>
-                                  Replies
-                                </div>
-                                {contactReplies.map((rep) => (
-                                  <div key={rep.id} style={{ fontSize: "0.75rem", border: "1px solid var(--accent)", borderRadius: "6px", padding: "0.4rem 0.6rem" }}>
-                                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "0.5rem" }}>
-                                      <span>↩ {rep.fromEmail}</span>
-                                      {rep.receivedAt && <span className="hint compact">{new Date(rep.receivedAt).toLocaleString()}</span>}
-                                    </div>
-                                    {rep.subject && <div style={{ marginTop: "0.2rem", fontWeight: 500 }}>{rep.subject}</div>}
-                                    {rep.bodySnippet && (
-                                      <div style={{ marginTop: "0.2rem", color: "var(--muted)", whiteSpace: "pre-wrap" }}>
-                                        {rep.bodySnippet.length > 240 ? `${rep.bodySnippet.slice(0, 240)}…` : rep.bodySnippet}
-                                      </div>
-                                    )}
-                                  </div>
-                                ))}
-                              </>
-                            )}
-                          </div>
-                        </td>
-                      </tr>
-                    )}
-                  </Fragment>
+                      )}
+                    </td>
+                    <td style={{ padding: "0.5rem 0.6rem" }}>
+                      <StatusPill status={r.status} />
+                      {r.hasReplied && (
+                        <span className="badge ok" style={{ marginLeft: "0.4rem", fontSize: "0.65rem" }} title="Replied to this outreach">
+                          ↩ Replied{(r.replyCount || 0) > 1 ? ` (${r.replyCount})` : ""}
+                        </span>
+                      )}
+                    </td>
+                    <td style={{ padding: "0.5rem 0.6rem" }} onClick={(e) => e.stopPropagation()}>
+                      {r.phone ? (
+                        <select
+                          value={r.phone_status || "pending"}
+                          onChange={(e) => onUpdateStatus?.(r.id, "phone_status", e.target.value)}
+                          style={{ fontSize: "0.72rem", padding: "0.15rem 0.3rem" }}
+                        >
+                          <option value="pending">Pending</option>
+                          <option value="sent">Msg sent</option>
+                          <option value="wrong_number">Wrong number</option>
+                        </select>
+                      ) : (
+                        <span className="hint">—</span>
+                      )}
+                    </td>
+                    <td style={{ padding: "0.5rem 0.6rem" }}>
+                      <span className="hint" style={{ margin: 0 }}>{r.source === "manual" ? "Manual" : "Auto-fetch"}</span>
+                    </td>
+                    <td style={{ padding: "0.5rem 0.6rem" }} onClick={(e) => e.stopPropagation()}>
+                      {queuedIds.has(r.id) ? (
+                        <span className="hint compact" style={{ display: "inline-flex", alignItems: "center", gap: "0.3rem", color: "var(--accent)" }}>
+                          <span className="spinner-dot" style={{ width: "6px", height: "6px", borderRadius: "50%", background: "var(--accent)", display: "inline-block" }} />
+                          Queued — sending soon…
+                        </span>
+                      ) : emailStatus !== "sent" ? (
+                        <button type="button" className="btn ghost" style={{ fontSize: "0.7rem", padding: "0.15rem 0.4rem" }} disabled={sending} onClick={() => sendList([r], { force: false })}>
+                          Send
+                        </button>
+                      ) : (
+                        <button type="button" className="btn ghost" style={{ fontSize: "0.7rem", padding: "0.15rem 0.4rem" }} disabled={sending} onClick={() => sendList([r], { force: true })}>
+                          Resend
+                        </button>
+                      )}
+                    </td>
+                  </tr>
                 );
               })}
             </tbody>
           </table>
         )}
-        <div ref={observerTarget} style={{ height: "1px" }} />
-        <p className="hint" style={{ margin: 0 }}>Showing {visible.length} of {filtered.length} ({recipients.length} total)</p>
+
+        {/* Pagination (2026-09-01, operator ask — "only 15 emails should be visible on one page"),
+            replacing the old infinite-scroll-more mechanism. */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "0.5rem", marginTop: "0.5rem" }}>
+          <p className="hint" style={{ margin: 0 }}>
+            Showing {filtered.length === 0 ? 0 : (currentPage - 1) * PAGE_SIZE + 1}–{Math.min(currentPage * PAGE_SIZE, filtered.length)} of {filtered.length} ({recipients.length} total)
+          </p>
+          {totalPages > 1 && (
+            <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+              <button type="button" className="btn ghost" disabled={currentPage <= 1} onClick={() => setPage(currentPage - 1)}>
+                ← Prev
+              </button>
+              <span className="hint compact" style={{ margin: 0 }}>Page {currentPage} of {totalPages}</span>
+              <button type="button" className="btn ghost" disabled={currentPage >= totalPages} onClick={() => setPage(currentPage + 1)}>
+                Next →
+              </button>
+            </div>
+          )}
+        </div>
       </div>
 
-      {previewEmail && mounted && createPortal(
-        <div className="modal-backdrop" role="presentation" onClick={() => setPreviewEmail(null)} style={{ zIndex: 99999 }}>
-          <div
-            className="modal-card"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="email-preview-modal-title"
-            style={{ width: "min(600px, 100%)" }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="modal-head">
-              <h2 id="email-preview-modal-title">Sent Email Preview</h2>
-              <button type="button" className="btn ghost" onClick={() => setPreviewEmail(null)}>Close</button>
-            </div>
-            <div className="modal-body" style={{ maxHeight: "60vh", overflowY: "auto" }}>
-              <div>
-                <strong style={{ color: "var(--muted)" }}>To:</strong> {previewEmail.email}
-              </div>
-              {(previewEmail.templateLabel || previewEmail.resumeLabel) && (
-                <div style={{ fontSize: "0.78rem", color: "var(--muted)" }}>
-                  {previewEmail.templateLabel && <>Template: <strong>{previewEmail.templateLabel}</strong></>}
-                  {previewEmail.templateLabel && previewEmail.resumeLabel && "  ·  "}
-                  {previewEmail.resumeLabel && <>Resume: <strong>{previewEmail.resumeLabel}</strong></>}
-                </div>
-              )}
-              <div style={{ paddingBottom: "0.75rem", borderBottom: "1px solid var(--line)" }}>
-                <strong style={{ color: "var(--muted)" }}>Subject:</strong> {previewEmail.subject || "(No Subject)"}
-              </div>
-              <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.5, color: "var(--fg)" }}>
-                {previewEmail.body || "(No Body)"}
-              </div>
-            </div>
-          </div>
-        </div>,
-        document.body
+      {detailRecipient && mounted && (
+        <EmailDetailPanel
+          recipient={detailRecipient}
+          roleDefs={roleDefs}
+          history={historyFor(detailRecipient)}
+          replies={repliesFor(detailRecipient)}
+          onClose={() => setDetailRecipientId(null)}
+        />
       )}
-
     </div>
   );
 }
