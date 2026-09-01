@@ -2,6 +2,20 @@
 
 Newest on top. Terse bullets only — done / in-progress / locked decisions / open items. Update every phase.
 
+- **2026-09-01 — DONE: JAMS Emails tab — click a row for full detail, real 15/page pagination.** Operator:
+  "all the emails should be clickable... a popup like a sidebar from the right side... all the information
+  about the email... whether there are any follow-ups or not, if we receive a reply, and the link of the
+  posts and everything" + "I need pagination... only 15 emails should be visible on one page." Shipped:
+  new `EmailDetailPanel.tsx` (right slide-over, new `.side-panel*` CSS pattern), replacing the old inline
+  expand-row + separate small preview modal with one consolidated view (job/match/post link, follow-ups,
+  replies, full send history) opened by clicking the row. Real pagination replaces the old infinite-scroll.
+  Full breakdown incl. two React-Compiler lint fights (impure `Date.now()`, ref-during-render both
+  disallowed by this repo's config) and their resolutions: `docs/architecture.md`'s new "JAMS Emails tab:
+  detail panel + real pagination" section. Build+lint clean, 144 baseline held, pushed to master+staging.
+  Not addressed yet: the ambiguous "in monitoring the background as usual, this is too late in human" line
+  in the same message — read as describing the overall problem (the list felt too raw/system-log-like) that
+  the above fixes address, not a separate ask about the actual "Monitoring" sub-tab (`ExecutionLogsPanel`).
+  Flagged to the operator; revisit if that's not what was meant.
 - **2026-09-01 — DONE: color palette LOCKED ("Signal" — teal/near-white/dark-ink), logo reuse reverted.**
   Two follow-ups to the entry directly below, same day. (1) Operator corrected process, not design: "i asked
   your opinion to actually implement it" — the Cuneihive-glyph reuse below was undone (`3133ed3`): HexMark
