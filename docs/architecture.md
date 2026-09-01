@@ -652,6 +652,45 @@ there are any follow-ups or not, if we receive a reply, and the link of the post
   page 2, while the "N selected" chip (which counts every selected id) kept implying otherwise. Fixed by
   deriving `selectedRecipients` from `filtered` instead.
 
+### JAMS: "results only, not process" — phone/algorithm-narration stripped from Emails, Monitoring became Responses (2026-09-01)
+Same-day follow-up to the section above. Operator, verbatim: "the user does not need to know that we are
+checking 110 messages each time just to check the reply... he will only care about the replies that he
+will get... it is the thing that needs to be in the backend not in the frontend... [in the Emails tab]
+this algorithm, AI infrastructure logic... do not add this phone information... use only the results of
+the information that we get... rename [Monitoring] to the responses and only show the responses that we
+get... this doesn't concern the user." Scoped to JAMS (Overview/Emails/Responses) — the concrete area
+discussed — not an open-ended app-wide audit.
+
+- **`ExecutionLogsPanel.tsx` deleted outright**, not just unmounted. It rendered every background job run
+  — scraper searches, send batches, follow-up batches, and the reply-check job itself — as a log feed;
+  none of that is a decision the candidate makes or a result they're waiting on, it's the mechanism, and
+  the operator's framing was explicit that mechanism belongs server-side only. The underlying data
+  (`automailsend_execution_logs`) is untouched — this was a frontend-only deletion, nothing backend
+  changed, so nothing about how the workers log is any different. If an admin-only view of raw job runs is
+  ever wanted later, that's a new build (e.g. inside `AdminPortal`), not a revival of this component —
+  flagged, not built, since it wasn't asked for.
+- **`JamsHub`'s third sub-tab renamed "Monitoring" → "Responses"**, new `ResponsesTab.tsx` replacing
+  `ExecutionLogsPanel` there. Reuses `replies`/`recipients`/`roleDefs` — data JamsHub already had loaded
+  for `JamsTab`, no new fetch. Shows only actual `ReplyRecord` entries (from-email, which contact/role it's
+  tied to, subject, snippet, received date), paginated 15/page same as Emails. Genuinely empty (not "0
+  replies found" chrome, just the plain "No replies yet" empty state) when there are none — per the
+  operator's explicit "if there are no replies there will be nothing to be shown here."
+- **Phone column/filter/status dropdown removed from `JamsTab.tsx`'s Emails table** (and the phone hint
+  line under a contact's email) — `Recipient.phone`/`phone_status` and the `automailsend_recipients`
+  columns behind them are untouched; this is presentation-only. `onUpdateStatus`'s `"phone_status"` call
+  site is gone from this file, but the prop itself stays declared in `JamsTab`'s `Props` type (`JamsHub`
+  still passes it through) since `JobPostCard.tsx` — a different screen (Jobs & Roles discovery board),
+  not named in the operator's ask — still has its own separate phone-status dropdown and wasn't touched.
+  Don't reintroduce phone tracking to the Emails tab without being asked again.
+- **`EmailDetailPanel.tsx`'s Phone section and `match_reasoning` display removed.** The distinction drawn:
+  `context_text` (the actual scraped job-post text — real external content, a result) stayed; `match_reasoning`
+  (the AI's own prose explaining why it scored a match the way it did — its internal narration about its
+  own process) did not. The match score/tone label itself (`"72 — Strong match"`) stayed too — that's a
+  clean result, not process narration.
+- Build clean; lint improved further to **138** (was 144 baseline, 142 after the previous JAMS pass) —
+  deleting `ExecutionLogsPanel.tsx` removed its own pre-existing lint entries along with it, and dropping
+  the phone filter removed an now-unused-state warning path.
+
 ## Resume Builder (2026-08-18)
 A resumai.com-style structured builder — genuinely separate from the `automailsend_resumes` file library
 above (structured, editable *data* vs. a finished *file*), living inside the same **Resumes** tab as a

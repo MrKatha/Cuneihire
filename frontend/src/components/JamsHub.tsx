@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { JamsOverviewTab } from "./JamsOverviewTab";
 import { JamsTab } from "./JamsTab";
-import { ExecutionLogsPanel } from "./ExecutionLogsPanel";
+import { ResponsesTab } from "./ResponsesTab";
 import type {
   AutomailConfig,
   CandidateProfile,
@@ -17,7 +17,7 @@ import type {
   SmtpConfig,
 } from "@/lib/types";
 
-type JamsSubTab = "overview" | "emails" | "monitoring";
+type JamsSubTab = "overview" | "emails" | "responses";
 
 type Props = {
   userId: string | null;
@@ -90,8 +90,8 @@ export function JamsHub({
           <button type="button" className={`btn ${subTab === "emails" ? "primary" : "ghost"}`} onClick={() => setSubTab("emails")}>
             Emails
           </button>
-          <button type="button" className={`btn ${subTab === "monitoring" ? "primary" : "ghost"}`} onClick={() => setSubTab("monitoring")}>
-            Monitoring
+          <button type="button" className={`btn ${subTab === "responses" ? "primary" : "ghost"}`} onClick={() => setSubTab("responses")}>
+            Responses
           </button>
         </div>
 
@@ -132,8 +132,8 @@ export function JamsHub({
           />
         )}
 
-        {subTab === "monitoring" && (
-          userId ? <ExecutionLogsPanel userId={userId} /> : <p className="hint">Sign in to see activity.</p>
+        {subTab === "responses" && (
+          userId ? <ResponsesTab replies={replies} recipients={recipients} roleDefs={roleDefs} /> : <p className="hint">Sign in to see your responses.</p>
         )}
       </div>
     </section>

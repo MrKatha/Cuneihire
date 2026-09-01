@@ -54,16 +54,21 @@
   base" section; briefly held a Files section same-day, moved to `ResumeConfigTab` on 2026-08-20 per
   operator ask to keep everything resume-related on the Resumes tab), `JamsHub` (2026-08-25, new — JAMS
   became the app's landing page/tab, replacing the old standalone `DashboardTab` (deleted): owns the page-
-  level "JAMS" header and a 3-way Overview/Emails/Monitoring sub-tab strip. `JamsOverviewTab` (2026-08-25,
+  level "JAMS" header and a 3-way Overview/Emails/Responses sub-tab strip (2026-09-01: was
+  Overview/Emails/Monitoring — see below). `JamsOverviewTab` (2026-08-25,
   new) is the "what's working" snapshot — stat tiles, recent activity, by-role breakdown, the Quick Send
   button; its own Automation card (checkbox/progress-bar/editable daily limit) was removed 2026-08-26 and
   the control moved to `SettingsTab` (below) as a single Play/Pause toggle. `JamsTab` is the "Emails"
   sub-tab — the unified lifecycle hub — every contact found, bulk/per-row send actions with "queued"
-  feedback, per-contact send history, and a collapsible `ExecutionLogsPanel` for automation activity
-  (`JamsHub`'s own "Monitoring" sub-tab also renders a bare `ExecutionLogsPanel`); absorbed the old
-  `RecipientManager`, `SendPanel`, and `QuickSendTab`, which are deleted; also shows a "↩ Replied" badge +
-  the contact's actual reply thread now (2026-08-19, reply monitoring) — see
-  [architecture.md](architecture.md)), `SettingsTab` (2026-08-25, rewritten 2026-08-26 — a flat card grid,
+  feedback, pagination (15/row, 2026-09-01), and a click-to-open `EmailDetailPanel` (2026-09-01, new — a
+  right-side slide-over with that contact's full job/send-history/reply/follow-up detail, replacing an
+  older inline expand-row); absorbed the old `RecipientManager`, `SendPanel`, and `QuickSendTab`, which are
+  deleted; also shows a "↩ Replied" badge (2026-08-19, reply monitoring) — see
+  [architecture.md](architecture.md). **`ExecutionLogsPanel` is deleted (2026-09-01)** — it showed every
+  background job run (scraper searches, send batches, the reply-check itself) as a raw log feed; operator:
+  "the user does not need to know... he will only care about the replies." `JamsHub`'s third sub-tab is now
+  `ResponsesTab` (2026-09-01, new, renamed from "Monitoring") — shows only actual replies received, nothing
+  when there are none, no job-run/algorithm detail at all. `SettingsTab` (2026-08-25, rewritten 2026-08-26 — a flat card grid,
   not tabs, matching `JamsOverviewTab`'s visual style: SMTP Accounts card (opens `SmtpConfigPanel`),
   LinkedIn card (opens `AutoFetchModal`), an Automation card (Play/Pause toggle, added 2026-08-26 — replaces
   the deleted `AutomailModal`), an Email section embedding `EmailConfigTab` (who writes each role's email),
@@ -76,7 +81,8 @@
   enable/disable, credit balance, temperature, and job-match strictness — see
   [architecture.md](architecture.md)'s "The AI tab" section), `AutoFetchModal` (LinkedIn scrape mechanics
   only — keywords live on `JobsRolesTab`), `AdminPortal` (2026-08-19: also grants ATS credits — see
-  below), `ExecutionLogsPanel`,
+  below), `EmailDetailPanel` (2026-09-01, new — see `JamsTab` above), `ResponsesTab` (2026-09-01, new —
+  see `JamsHub` above),
   `ResumeBuilder` (2026-08-18, new: structured section-by-section resume editor with a live preview —
   see [architecture.md](architecture.md)'s "Resume Builder" section; its Experience/Education/Projects/
   Certifications/Languages section editors are exported since 2026-08-19 for `ProfileTab` and

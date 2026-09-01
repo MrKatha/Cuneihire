@@ -2,6 +2,23 @@
 
 Newest on top. Terse bullets only — done / in-progress / locked decisions / open items. Update every phase.
 
+- **2026-09-01 — DONE: JAMS "results only, not process" pass — Monitoring became Responses, phone/AI-
+  reasoning stripped from Emails.** Operator, same day as the two entries below, going further than the
+  Monitoring humanizing pass: "the user does not need to know that we are checking 110 messages... he will
+  only care about the replies... it needs to be in the backend not in the frontend... [Emails tab] this
+  algorithm, AI infrastructure logic... do not add this phone information... rename [Monitoring] to the
+  responses and only show the responses that we get... if there are no replies there will be nothing to be
+  shown here." Shipped: `ExecutionLogsPanel.tsx` deleted outright (data in
+  `automailsend_execution_logs` untouched, frontend-only removal); new `ResponsesTab.tsx` (replies only,
+  paginated, genuinely empty when there are none) is now `JamsHub`'s third sub-tab; phone
+  column/filter/status-dropdown removed from `JamsTab.tsx`'s Emails table (data model untouched,
+  presentation-only — `JobPostCard.tsx`'s separate phone dropdown elsewhere wasn't touched, out of scope);
+  `EmailDetailPanel.tsx`'s Phone section and the AI's `match_reasoning` narration text removed (match
+  score/tone label kept — that's a result, not process). Full breakdown + the context_text-vs-
+  match_reasoning distinction: `docs/architecture.md`. Build clean, lint improved to **138** (was 144
+  baseline). Pushed to master+staging. Scoped to JAMS (Overview/Emails/Responses) per the operator's own
+  concrete examples — not treated as an open-ended app-wide audit; if other spots leak backend/algorithm
+  detail, they'll need to be pointed out specifically.
 - **2026-09-01 — DONE: JAMS Monitoring tab made human-readable (confirms the earlier guess was right).**
   Operator: "fix the monitoring section in our JAMS... completely non-understandable to anyone who is
   reading it." Confirms the read from the previous entry's open item was correct — this WAS the separate

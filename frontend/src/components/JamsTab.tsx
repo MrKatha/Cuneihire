@@ -70,10 +70,8 @@ export function JamsTab({
   onSendingChange,
   delaySec,
   onDelayChange,
-  onUpdateStatus,
 }: Props) {
   const [filterStatus, setFilterStatus] = useState("all");
-  const [filterPhoneStatus, setFilterPhoneStatus] = useState("all");
   const [filterSource, setFilterSource] = useState("all");
   const [filterRole, setFilterRole] = useState("all");
   const [searchQuery, setSearchQuery] = useState("");
@@ -164,16 +162,15 @@ export function JamsTab({
   const filtered = useMemo(() => {
     return recipients.filter((r) => {
       if (filterStatus !== "all" && (r.status || "pending") !== filterStatus) return false;
-      if (filterPhoneStatus !== "all" && (r.phone_status || "pending") !== filterPhoneStatus) return false;
       if (filterSource !== "all" && (r.source || "auto_fetch") !== filterSource) return false;
       if (filterRole !== "all" && r.role !== filterRole) return false;
       if (searchQuery) {
         const q = searchQuery.toLowerCase();
-        if (![r.email, r.phone, r.title].some((v) => (v || "").toLowerCase().includes(q))) return false;
+        if (![r.email, r.title].some((v) => (v || "").toLowerCase().includes(q))) return false;
       }
       return true;
     });
-  }, [recipients, filterStatus, filterPhoneStatus, filterSource, filterRole, searchQuery]);
+  }, [recipients, filterStatus, filterSource, filterRole, searchQuery]);
 
   // No explicit "reset to page 1 on filter change" effect here (that pattern needs either a useEffect,
   // which this repo's React Compiler lint config flags as a cascading-render risk, or a ref read/write
@@ -361,7 +358,7 @@ export function JamsTab({
             <span>Search</span>
             <input
               type="text"
-              placeholder="Search email, phone, title..."
+              placeholder="Search email, title..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
             />
@@ -373,15 +370,6 @@ export function JamsTab({
               <option value="pending">Pending</option>
               <option value="sent">Sent</option>
               <option value="failed">Failed</option>
-            </select>
-          </label>
-          <label className="field">
-            <span>Phone status</span>
-            <select value={filterPhoneStatus} onChange={(e) => setFilterPhoneStatus(e.target.value)}>
-              <option value="all">All</option>
-              <option value="pending">Pending</option>
-              <option value="sent">Msg sent</option>
-              <option value="wrong_number">Wrong number</option>
             </select>
           </label>
           <label className="field">
@@ -455,7 +443,6 @@ export function JamsTab({
                 <th style={{ textAlign: "left", padding: "0.5rem 0.6rem", color: "var(--muted)", fontWeight: 600 }}>Role &amp; title</th>
                 <th style={{ textAlign: "left", padding: "0.5rem 0.6rem", color: "var(--muted)", fontWeight: 600 }}>Match</th>
                 <th style={{ textAlign: "left", padding: "0.5rem 0.6rem", color: "var(--muted)", fontWeight: 600 }}>Email</th>
-                <th style={{ textAlign: "left", padding: "0.5rem 0.6rem", color: "var(--muted)", fontWeight: 600 }}>Phone</th>
                 <th style={{ textAlign: "left", padding: "0.5rem 0.6rem", color: "var(--muted)", fontWeight: 600 }}>Source</th>
                 <th style={{ textAlign: "left", padding: "0.5rem 0.6rem", color: "var(--muted)", fontWeight: 600 }}>Actions</th>
               </tr>
@@ -477,7 +464,6 @@ export function JamsTab({
                     </td>
                     <td style={{ padding: "0.5rem 0.6rem" }}>
                       <div>{r.email || <span className="hint">No email</span>}</div>
-                      {r.phone && <div className="hint" style={{ margin: 0 }}>{r.phone}</div>}
                     </td>
                     <td style={{ padding: "0.5rem 0.6rem" }}>
                       <span className="chip">{roleLabel(roleDefs, r.role)}</span>
@@ -510,21 +496,6 @@ export function JamsTab({
                         <span className="badge ok" style={{ marginLeft: "0.4rem", fontSize: "0.65rem" }} title="Replied to this outreach">
                           ↩ Replied{(r.replyCount || 0) > 1 ? ` (${r.replyCount})` : ""}
                         </span>
-                      )}
-                    </td>
-                    <td style={{ padding: "0.5rem 0.6rem" }} onClick={(e) => e.stopPropagation()}>
-                      {r.phone ? (
-                        <select
-                          value={r.phone_status || "pending"}
-                          onChange={(e) => onUpdateStatus?.(r.id, "phone_status", e.target.value)}
-                          style={{ fontSize: "0.72rem", padding: "0.15rem 0.3rem" }}
-                        >
-                          <option value="pending">Pending</option>
-                          <option value="sent">Msg sent</option>
-                          <option value="wrong_number">Wrong number</option>
-                        </select>
-                      ) : (
-                        <span className="hint">—</span>
                       )}
                     </td>
                     <td style={{ padding: "0.5rem 0.6rem" }}>
