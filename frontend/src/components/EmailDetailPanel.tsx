@@ -30,6 +30,19 @@ function formatFriendlyError(errorMsg?: string) {
   return "Something went wrong while sending this email.";
 }
 
+// A short excerpt, not the raw scraped post (2026-09-02, operator ask — "show a summary of the post not
+// the actual post... if the user wants to read the post, they can go to the post link itself," which
+// already sits right below this in the UI). Plain truncation, not a new AI call — collapses whitespace
+// (scraped LinkedIn text often has awkward line breaks) and cuts at a word boundary rather than mid-word.
+// If real AI-generated summaries are wanted later, this is the one function to swap.
+function summarizePost(text: string, maxChars = 220): string {
+  const collapsed = text.replace(/\s+/g, " ").trim();
+  if (collapsed.length <= maxChars) return collapsed;
+  const cut = collapsed.slice(0, maxChars);
+  const lastSpace = cut.lastIndexOf(" ");
+  return `${(lastSpace > maxChars * 0.6 ? cut.slice(0, lastSpace) : cut).trim()}…`;
+}
+
 // Exported (2026-09-01) so ResponseDetailPanel.tsx can reuse the same section/history-entry presentation
 // instead of duplicating it — both panels show overlapping content (job context, send history), just in a
 // different order/emphasis.
@@ -172,9 +185,9 @@ export function EmailDetailPanel({ recipient: r, roleDefs, history, replies, onC
                 </div>
               )}
               {r.context_text && (
-                <div style={{ fontSize: "0.75rem", color: "var(--muted)", lineHeight: 1.5, maxHeight: "6rem", overflowY: "auto", border: "1px solid var(--line)", borderRadius: "8px", padding: "0.5rem", whiteSpace: "pre-wrap" }}>
-                  {r.context_text}
-                </div>
+                <p style={{ fontSize: "0.8rem", color: "var(--muted)", lineHeight: 1.55, margin: 0 }}>
+                  {summarizePost(r.context_text)}
+                </p>
               )}
               {postUrl && (
                 <a href={postUrl} target="_blank" rel="noopener noreferrer" className="btn ghost" style={{ alignSelf: "flex-start", fontSize: "0.75rem" }}>
