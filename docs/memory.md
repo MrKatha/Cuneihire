@@ -2,6 +2,16 @@
 
 Newest on top. Terse bullets only — done / in-progress / locked decisions / open items. Update every phase.
 
+- **2026-09-01 — DONE: Cuneihire's logo mark is now literally Cuneihive's own glyph.** Operator: "we are
+  not using any of the cuneihive design in fact we will have a different design i am just asking about the
+  logo" — palette/type/layout stay Cuneihire's own (2026-08-17 decision, unchanged), only the mark itself
+  is shared. Copied `F:\Cuneihive-V3\public\logo.png` → `frontend/public/brand-mark.png`; `HexMark.tsx`'s
+  "outline" variant now renders that image via `next/image` instead of the old coded clip-path hex (same
+  prop API, so all 11 existing call sites needed zero changes); favicon (`app/icon.svg`) rebuilt the same
+  way, real mark embedded as base64 over the existing off-white square. No vector source exists for
+  Cuneihive's real mark anywhere local — raster is fine given it only ever renders at ~18-30px, downscaled
+  from the 512×512 source. Build + lint both clean, still exactly the 144-problem baseline. See
+  `docs/design.md`'s "Visual direction" section for the full note. Not yet pushed/deployed as of this entry.
 - **2026-08-31 — DONE: pricing LOCKED (Starter/Pro/Elite, $20/$32.73/$50) + JobSpy hard-gated to dev only.**
   Operator decisions, both shipped: (1) JobSpy/Indeed sourcing now refuses to even start unless
   `JOBSPY_SOURCING_ENABLED_GLOBALLY=true` (only staging's env sets it — a real code-level boundary, not

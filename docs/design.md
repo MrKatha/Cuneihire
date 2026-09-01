@@ -36,6 +36,15 @@
 - **Motif**: a hexagon brand mark (`frontend/src/components/ui/HexMark.tsx` — the first entry in a `ui/`
   primitives folder, none existed before), used as the logo, status dots, and step markers. Restrained —
   not Cuneihive's honeycomb backdrops or storytelling diagrams.
+- **Logo mark reuses Cuneihive's actual glyph (2026-09-01, operator decision)**: everything else stays
+  distinct (palette/type/layout, per the 2026-08-17 decision above) but the `HexMark`'s "outline" variant
+  is now literally Cuneihive's own split-hex logo (`frontend/public/brand-mark.png`, copied from
+  `F:\Cuneihive-V3\public\logo.png`), not a lookalike coded shape. No vector source exists anywhere for
+  the real mark (Cuneihive-V3 only has PNGs) — raster is fine at the ~18-30px sizes this renders in-app,
+  all downscaled from the 512×512 source. Favicon (`frontend/src/app/icon.svg`) updated the same way:
+  same off-white square background as before, real mark embedded inside as base64. The generic filled-hex
+  `variant="solid"` (status dots/bullets, currently unused anywhere) is untouched — it was never the brand
+  mark itself, just a shared utility shape.
 
 ## This project
 - The core flow is exactly the seed pattern: **SMTP Config → Recipients → Role Templates → Send**, all inside
