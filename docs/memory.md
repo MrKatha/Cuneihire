@@ -11,7 +11,8 @@ Newest on top. Terse bullets only — done / in-progress / locked decisions / op
   way, real mark embedded as base64 over the existing off-white square. No vector source exists for
   Cuneihive's real mark anywhere local — raster is fine given it only ever renders at ~18-30px, downscaled
   from the 512×512 source. Build + lint both clean, still exactly the 144-problem baseline. See
-  `docs/design.md`'s "Visual direction" section for the full note. Not yet pushed/deployed as of this entry.
+  `docs/design.md`'s "Visual direction" section for the full note. Pushed to master + staging (`9d8be3b`);
+  Vercel auto-deploys master on push, no backend involved so no manual deploy step needed here.
 - **2026-08-31 — DONE: pricing LOCKED (Starter/Pro/Elite, $20/$32.73/$50) + JobSpy hard-gated to dev only.**
   Operator decisions, both shipped: (1) JobSpy/Indeed sourcing now refuses to even start unless
   `JOBSPY_SOURCING_ENABLED_GLOBALLY=true` (only staging's env sets it — a real code-level boundary, not
