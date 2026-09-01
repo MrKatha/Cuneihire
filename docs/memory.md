@@ -15,6 +15,16 @@ Newest on top. Terse bullets only — done / in-progress / locked decisions / op
   only). Also flagged, not yet resolved: every signup still defaults `plan_tier='free'` with no forcing
   function to subscribe — needs a real decision (time-boxed trial vs. "mostly locked until you subscribe")
   once that wiring happens.
+- **2026-08-31 — FIXED same day: public resume builder now reuses the REAL design, not a simplified fork.**
+  Operator feedback on the Phase A ship below: "the designs that you have right now on the resume builder
+  are completely cracked... just pick the code that you already have, the same design, same proportion,
+  everything." Reworked `PublicResumeBuilder.tsx` to reuse the actual `ResumeBuilder.tsx` section
+  components + the real A4/page-break-aware live preview (pagination effects copied faithfully, not
+  through that component directly — see docs/architecture.md) instead of the ad-hoc form I'd built. Four
+  section components exported from `ResumeBuilder.tsx` for this (zero behavior change to the authed
+  builder). Confirmed: exactly one free resume without an account (localStorage, no multi-draft), a
+  "Sign up to save multiple resumes" CTA added next to Download. Build/lint clean, deployed, confirmed
+  live at `hire.cuneihive.com/resume-builder`.
 - **2026-08-31 — DONE (Phase A), shipped and live: public resume builder** (ClickUp `86eytbf5e`, Phase 4).
   Live at `hire.cuneihive.com/resume-builder`, smoke-tested end to end in production (page 200, lead-capture
   POST confirmed inserted then cleaned up). Built as a separate `PublicResumeBuilder.tsx` sibling (not a
