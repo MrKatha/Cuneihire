@@ -2,7 +2,25 @@
 
 Newest on top. Terse bullets only — done / in-progress / locked decisions / open items. Update every phase.
 
-- **2026-09-01 — DONE: Cuneihire's logo mark is now literally Cuneihive's own glyph.** Operator: "we are
+- **2026-09-01 — DONE: color palette LOCKED ("Signal" — teal/near-white/dark-ink), logo reuse reverted.**
+  Two follow-ups to the entry directly below, same day. (1) Operator corrected process, not design: "i asked
+  your opinion to actually implement it" — the Cuneihive-glyph reuse below was undone (`3133ed3`): HexMark
+  outline variant and favicon are back to the coded hex placeholder, `brand-mark.png` removed. Operator is
+  sourcing a different logo separately — don't touch the mark again unless asked. (2) Operator: "i dont like
+  the colors at all so you need to change those for sure." Built 3 real candidate palettes as a local HTML
+  mockup (scratchpad, never published — see [[no-online-artifacts-for-design]]) using actual app components
+  (nav/panel/buttons/badges/role-tabs), not abstract swatches, opened it locally for review rather than
+  reskinning the live app blind. Operator picked "C — Signal": paper `#f4f5f5`, ink `#181c1b`, accent
+  (deep teal) `#0f7a6e`, line `#dde2e1`, status ok/warn/danger `#2e8f5c`/`#b8860c`/`#c23b4e`. Shipped: 10
+  tokens in `globals.css` + favicon hex values updated to match (both were the only 2 places the old
+  palette was hardcoded outside resume-document templates, which are deliberately untouched — see
+  docs/design.md). Build+lint clean, 144 baseline held. This is now the **locked standard** — every future
+  module/update follows these tokens, per operator's own instruction. Full values: `docs/design.md`'s
+  "Visual direction" section. Still open: "the UI needs a lot of work" beyond color — operator hasn't given
+  anything concrete yet (spacing/density/layout/IA all unnamed); asked once, no answer yet, don't guess at
+  it blind.
+- **2026-09-01 — SUPERSEDED same day (see entry above) — DONE: Cuneihire's logo mark is now literally
+  Cuneihive's own glyph.** Operator: "we are
   not using any of the cuneihive design in fact we will have a different design i am just asking about the
   logo" — palette/type/layout stay Cuneihire's own (2026-08-17 decision, unchanged), only the mark itself
   is shared. Copied `F:\Cuneihive-V3\public\logo.png` → `frontend/public/brand-mark.png`; `HexMark.tsx`'s
