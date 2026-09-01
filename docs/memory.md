@@ -15,6 +15,21 @@ Newest on top. Terse bullets only — done / in-progress / locked decisions / op
   only). Also flagged, not yet resolved: every signup still defaults `plan_tier='free'` with no forcing
   function to subscribe — needs a real decision (time-boxed trial vs. "mostly locked until you subscribe")
   once that wiring happens.
+- **2026-08-31 — DONE: real tier enforcement — plan_tier went from a label to actually gating features.**
+  Operator spec (verbatim numbers in docs/pricing-tiers.md): daily send caps revised to Starter 10 / Pro 20
+  / Elite 50; one SMTP account per user for now, globally, all tiers (temporary — a global setting, not a
+  tier column); AI-written/AI-selected email content is Pro/Elite only (match-scoring AI stays on every
+  tier — these were conflated under one flag before, now split); follow-ups Starter 0 / Pro 1 / Elite 3;
+  reply monitoring Pro/Elite only. 4 new schema columns + 1 new global setting, all defaulting to values
+  that preserve today's behavior for every existing account. Real backend enforcement in
+  followUp/automail/batchSend/replyPoll workers (not just UI hints) + frontend gating in SmtpConfigPanel/
+  EmailConfigTab. `lib/lemonSqueezy.ts` renamed Premium→Elite throughout (Free kept only as the technical
+  unsubscribed default, not a sellable tier). Two build-time bugs caught and fixed before shipping: an
+  accidental dropped `import crypto` and a React Compiler eslint false-positive in BillingCard.tsx's
+  rewritten buttons. Build/lint clean (144 baseline), migration + both deploys (backend workers, frontend)
+  confirmed live in production. See docs/architecture.md's "Tier-gated feature limits" section for exactly
+  which flag gates what. **Known gap, not urgent**: the SMTP-account cap has no server-side enforcement
+  yet (UI-only) — fine since it's explicitly a temporary, non-adversarial cap per the operator's framing.
 - **2026-08-31 — FIXED same day: public resume builder now reuses the REAL design, not a simplified fork.**
   Operator feedback on the Phase A ship below: "the designs that you have right now on the resume builder
   are completely cracked... just pick the code that you already have, the same design, same proportion,

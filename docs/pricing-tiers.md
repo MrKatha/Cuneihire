@@ -106,14 +106,23 @@ with what's included (operator decision, 2026-08-31), not flat:
 | App credits (initial grant) | 500 | 1500 | 4000 |
 | Keyword cap | 10 | 30 | Uncapped (`null`) |
 | Fetch interval floor | 120min | 60min | 15min |
-| Daily send cap | 30 | 75 | 150 |
+| **Daily send cap** | **10** | **20** | **50** |
+| **SMTP accounts allowed** | **1** | **1** | **1** |
+| **AI-written emails** (write or AI-select) | **No** | **Yes** | **Yes** |
+| **Follow-ups** | **0** | **1** | **3** |
+| **Reply monitoring** | **No** | **Yes** | **Yes** |
 
 The cost-to-serve column ($10/$18/$30) is the operator's own estimate, not derived from metered data yet
 — revisit once `automailsend_ai_usage_log`/`automailsend_infra_usage_log` have real per-tier volume to
 confirm it. The $ prices are exact given that cost input and the locked margins; psychological rounding
-(e.g. $19/$32/$49) is a final polish call, not a math one. AI/app-credit, keyword, and interval numbers
-are still positioning calls (unchanged from the original illustrative table) — only the $ price math is
-now backed by real inputs.
+(e.g. $19/$32/$49) is a final polish call, not a math one. AI/app-credit and keyword/interval numbers are
+still positioning calls (unchanged from the original illustrative table). The five **bolded rows are a
+same-day revision** (2026-08-31, second operator pass) — daily send caps came down from an earlier draft
+(30/75/150) to these real numbers, and four new levers were added: a single-SMTP-account cap (global,
+temporary, same for every tier "for now" per the operator — not a real tier differentiator yet), the
+AI-written-email gate (match-scoring AI stays available on every tier — this only gates AI touching the
+email itself), the follow-up count cap, and reply monitoring. All four are now for-real enforced — see
+docs/architecture.md's "Tier-gated feature limits" section for exactly which worker/UI checks which flag.
 
 **One open implementation question this surfaces, not blocking the numbers above**: every signup still
 defaults `plan_tier` to `'free'` (`supabase_setup.sql`), and nothing currently forces a subscription choice

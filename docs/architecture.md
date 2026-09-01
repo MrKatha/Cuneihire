@@ -412,6 +412,45 @@ new "Billing" card in `SettingsTab.tsx`'s flat card grid.
 `GEMINI_API_KEY`. Code builds and type-checks against these names regardless; live checkout/webhook
 verification is blocked until the operator creates the Lemon Squeezy store + Pro/Premium products/variants.
 
+## Tier-gated feature limits (2026-08-31) — plan_tier goes from a label to real enforcement
+Operator spec, verbatim decisions logged in `docs/pricing-tiers.md`'s "Subscription tiers" table. Extends
+the Lemon Squeezy work above rather than replacing it — `lib/lemonSqueezy.ts`'s `TIER_LEVERS` (already
+wired into the webhook's genuine-tier-change path) is the single source of truth for every number below.
+
+- **Daily send cap** — real values now: Starter 10 / Pro 20 / Elite 50 (`daily_mail_limit`, an existing
+  column — no new plumbing, just real per-tier defaults instead of placeholders).
+- **One SMTP account per user, globally, for now** — new `automailsend_global_settings.
+  max_smtp_accounts_per_user` (default 1), deliberately a global ceiling, not a per-tier column: the
+  operator's framing was explicitly temporary ("once we have other functions down, we can add multiple
+  SMTPs later"), not a real tier differentiator yet. `SmtpConfigPanel.tsx` hides "+ Add account" once at
+  the cap. **UI-level only** — there's no server-side check yet, since SMTP accounts save via a direct
+  RLS-protected Supabase insert with no API route in between to enforce against. Acceptable for now (a
+  non-adversarial, temporary cap), a real gap if this ever needs to be abuse-proof.
+- **AI-written email content is Pro/Elite only** — new `automailsend_app_state.ai_email_writing_enabled`
+  (default `true`, so nothing regresses until a tier is actually assigned). Deliberately separate from
+  `ai_personalization_enabled` (the user's own on/off preference, which ALSO gates AI job-match *scoring*
+  in `scraper.worker.js`/`jobspy.worker.js`, untouched by this new flag) — a Starter account can have AI
+  scoring on but still can't get AI-written or AI-selected email content. Enforced at every AI-write/
+  AI-select call site in `automail.worker.js`/`batchSend.worker.js`/`followUp.worker.js` (ANDed into the
+  existing `aiEnabled` check), and in the UI via `EmailConfigTab.tsx`'s send-mode radios (Manual always
+  available; "Let AI choose"/"Let AI write it" disabled with a "not included on your current plan" note).
+- **Follow-up count cap** — new `automailsend_app_state.max_follow_ups` (default 3): Starter 0 / Pro 1 /
+  Elite 3. `followUp.worker.js`'s `MAX_FOLLOW_UPS` constant (3) is now only the ceiling nothing can exceed
+  regardless of tier (matches the 3 real `follow_up_template_N_id` slots) — the actual per-user cap is
+  `user.max_follow_ups`, clamped against it. A Starter account (0) skips the follow-up loop entirely.
+  `EmailConfigTab.tsx` hides slots beyond the cap and shows "not included on your current plan" at 0.
+- **Reply monitoring is Pro/Elite only** — new `automailsend_app_state.reply_monitoring_enabled` (default
+  `true`). `replyPoll.worker.js` skips any account whose user has this `false`, even if that specific
+  account's own `imap_enabled` is still `true` (a downgrade doesn't retroactively flip that per-account
+  toggle — this is the actual enforcement point). `SmtpConfigPanel.tsx`'s "Enable reply monitoring"
+  checkbox is hidden (replaced with the same plan-limit note) when this is `false`, on top of its existing
+  `canMonitorReplies` gate (a completely separate, provider-capability check — SendGrid/Resend have no
+  inbox to poll, unrelated to tier).
+
+All four new columns default to values that preserve today's behavior for every existing/unassigned
+account — nothing regressed for anyone until a real tier is actually assigned via the Lemon Squeezy webhook
+or an admin override. Migration applied live to production the same session.
+
 ## Staging environment (2026-08-31)
 Operator's own proposal, adopted as-is: separate environments by **branch**, not by repo, to avoid turning
 the existing "two copies of `supabase_setup.sql` must stay byte-identical" fragility into a three-way sync
