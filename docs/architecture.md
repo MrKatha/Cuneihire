@@ -2192,3 +2192,54 @@ shown after a user has already opted into reply monitoring with a tooltip explai
 "Custom" provider path — already an inherently technical fork).
 
 Build clean, lint held at 137 (unchanged from the prior pass). New file: `lib/friendlyError.ts`.
+
+## AI job-post summaries, threaded Responses, clickable reply toast (2026-09-02)
+Three follow-up requests after using the "results only" Emails/Responses tabs. Operator confirmed two
+design decisions directly (both recommended options): the AI summary generates on-demand the first time a
+panel is opened rather than at scrape time, and the new threaded view applies to the Responses tab only.
+
+**AI summary.** The Emails detail panel's "The job" section still showed a plain-code truncation of the raw
+scraped post (`EmailDetailPanel.tsx`'s `summarizePost()`) — read as raw scraped text, not a real summary.
+Investigated whether this could piggyback on the existing match-scoring AI call and found it couldn't: the
+scoring pipeline (`matchAlgorithm.service.js` + `ai.service.js`, 2026-08-28) deliberately runs a free
+algorithm first and only escalates to Gemini when it can't resolve confidently, so there's no reliably-
+happening per-post AI call to attach a summary to. New `automailsend_recipients.ai_summary`/
+`ai_summary_generated_at` columns (denormalized, same convention as `context_text`/`match_score` — applied
+to the live DB via the Supabase Management API, not just the two `supabase_setup.sql` files), a new
+`summarizeJobPost()` in `lib/aiClient.ts`, and a new `app/api/summarize-post/route.ts` (mirrors
+`api/ai-enhance`'s auth→gate→work→spend-credit shape, using `lib/adminAuth.ts`'s shared `supabaseAdmin`
+rather than a new service-role client). `EmailDetailPanel.tsx` fetches on mount only when `context_text`
+exists and `ai_summary` doesn't, shows a quiet `.skeleton-line` pulse (new CSS) while waiting — no loading
+text, per "results only" — and falls back silently to the old truncation on any failure. A new
+`onAiSummaryGenerated` callback threads `EmailDetailPanel → JamsTab → JamsHub → page.tsx` so the freshly
+generated summary lands in the session's own `recipients` state (the API route already persisted it
+server-side) and a reopen is instant, no repeat network call.
+
+**Threaded Responses.** `ResponseDetailPanel.tsx`'s four separate sections ("Their reply" / "Reply" /
+"Other replies from this contact" / "Emails sent to this contact") became one merged, chronological thread
+(a new local `ThreadItem` union + `ThreadMessage` component) — every sent email and every reply for that
+contact, interleaved oldest-first, visually distinct by sender, a failed send still shows
+`friendlySendError()` inline. "The job" moved to a pinned header above the thread; the compose box stays
+pinned below it, logic untouched. `EmailDetailPanel.tsx`'s `HistoryEntry` stays as it was — this is a
+Responses-only change, not shared.
+
+**Clickable reply toast.** The realtime new-reply toast in `page.tsx` did nothing when clicked. Now it
+jumps straight to JAMS' Responses sub-tab and opens that exact reply. Implemented as a render-time-derived
+override (`pendingReplyFocus`, threaded `page.tsx → JamsHub.tsx → ResponsesTab.tsx`) rather than syncing an
+incoming prop into local state via an effect — this repo's React Compiler `react-hooks/set-state-in-effect`
+rule forbids that pattern outright. Each component computes `pendingReplyFocus ?? own-local-state` at
+render time instead; every manual-navigation path (any sidebar tab, any JamsHub sub-tab, any Responses row,
+closing the panel) clears it. `handleTabChange` itself clears any stale focus (covers every call site with
+one line, present or future); the toast's own click handler calls `handleTabChange('emails')` then sets a
+fresh `pendingReplyFocus` right after in the same synchronous handler — React's automatic batching means
+the second call is what's actually in effect once the batch flushes, so clear-then-set in one handler is
+safe by construction.
+
+**Verified**: `npm run build` clean; `npm run lint` at the pre-existing 137-problem baseline with zero new
+findings in any touched file (confirmed via full-log grep, not just the tail). No `backend/src/**` changes
+— no backend deploy needed this pass. Deployed and confirmed via `gh api .../commits/767134c/status`.
+
+**Files touched**: `frontend/src/components/EmailDetailPanel.tsx`, `ResponseDetailPanel.tsx`,
+`ResponsesTab.tsx`, `JamsHub.tsx`, `JamsTab.tsx`, `app/[[...tab]]/page.tsx`, new
+`app/api/summarize-post/route.ts`, `lib/aiClient.ts`, `lib/types.ts`, `lib/storage.ts`, `app/globals.css`
+(new `.skeleton-line`), both `supabase_setup.sql` files.

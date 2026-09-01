@@ -2,6 +2,21 @@
 
 Newest on top. Terse bullets only — done / in-progress / locked decisions / open items. Update every phase.
 
+- **2026-09-02 — DONE: AI job-post summaries (on-demand+cached), Responses tab threaded, reply toast
+  clickable.** Operator: the "job" summary shown was still a plain-code truncation, not AI-written — "AI
+  is being used anyway [scraping]... what's happening in the background should not be visible... it's
+  bothering me." Asked directly, operator chose on-demand generation (first panel-open, cached after —
+  not at scrape time, since the match-scoring pipeline doesn't reliably call AI per-post either) and
+  Responses-tab-only threading. Shipped: new `automailsend_recipients.ai_summary` column (applied live via
+  Supabase Management API + both `supabase_setup.sql` files), new `/api/summarize-post` route +
+  `aiClient.summarizeJobPost`, `EmailDetailPanel.tsx` fetch-on-open with a quiet skeleton pulse and silent
+  fallback to the old truncation on failure. `ResponseDetailPanel.tsx` rebuilt around one merged
+  chronological sent+received thread instead of four separate sections. New-reply toast is now clickable,
+  jumps to Responses + that exact reply — built as a render-time `pendingReplyFocus ?? local-state`
+  override (page.tsx → JamsHub → ResponsesTab), not an effect-synced prop, to stay clear of this repo's
+  `react-hooks/set-state-in-effect` lint rule. Zero backend deploy needed. Full breakdown:
+  `docs/architecture.md`. Build clean, lint at the existing 137 baseline, zero new findings.
+
 - **2026-09-02 — DONE: site-wide usability audit follow-through — Job Board tab hidden, shared friendly-
   error helper, terminology cleanup, Bio/Email Blurb overlap fixed.** Operator: "go ahead not just with the
   specific one but with all of these that you mentioned." Job Board tab (candidate-facing recruiter
