@@ -43,13 +43,32 @@ function cleanPhoneAdvanced(p) {
   return String(p).replace(/[^\d+]/g, '').replace(/(?!^)\+/g, '');
 }
 
+// A "children" slot in this wire format is either literal text (what we want) or a lazy reference to
+// another chunk, serialized as "$L<hexId>" (e.g. "$L15", "$L4c") -- structurally the same convention
+// this file's own referencersOf() already parses on the other side of a reference. The old filter here
+// only excluded the literal string "$undefined", so every "$L<hex>" reference token was captured as if
+// it were a real line of post text and joined straight into context_text (confirmed live, 2026-09-02 --
+// every one of 77 scraped job posts in the DB had this contamination, e.g. "$L15\n$L4c\n$L5c\n...\n📍
+// Location: Mumbai..."). Match requires the "L" specifically (not the bare "$<hex>" form
+// referencersOf() also tolerates elsewhere) so a genuine dollar amount like "$15" or "$101" in real post
+// text is never at risk of being mistaken for one of these.
+const CHUNK_REFERENCE_RE = /^\$L[0-9a-fA-F]+$/;
+
+// Same contamination class as CHUNK_REFERENCE_RE above, but for extractInitialContacts below — the
+// deepest legacy fallback, which truncates the raw payload directly rather than parsing it line-by-line,
+// so it never goes through extractLineTexts' filtering at all. \b keeps this from ever touching a real
+// dollar amount like "$15" or "$101" mid-sentence (those aren't followed immediately by "L").
+function stripChunkReferenceTokens(text) {
+  return text.replace(/\$L[0-9a-fA-F]+\b/g, '').replace(/\s{2,}/g, ' ').trim();
+}
+
 function extractLineTexts(chunk) {
   const lines = [];
   const re = /"children"\s*:\s*\[\s*(?:null|\[[\s\S]*?\])\s*,\s*"((?:\\.|[^"\\])*)"\s*\]/g;
   let m;
   while ((m = re.exec(chunk)) !== null) {
     const line = unescapePayload(m[1]);
-    if (line && line !== '$undefined') lines.push(line);
+    if (line && line !== '$undefined' && !CHUNK_REFERENCE_RE.test(line)) lines.push(line);
   }
   return lines;
 }
@@ -250,7 +269,7 @@ function extractInitialContacts(rawStr) {
   // a real, clickable, still-usually-relevant link, which beats a guaranteed-broken one every time.
   const source_urls = uniqueUrls[0] || null;
 
-  return { emails: uniqueEmails, phones: uniquePhones, source_urls, contextText: cleanText.substring(0, 5000) };
+  return { emails: uniqueEmails, phones: uniquePhones, source_urls, contextText: stripChunkReferenceTokens(cleanText).substring(0, 5000) };
 }
 
 function extractPaginatedContacts(rawStr) {
