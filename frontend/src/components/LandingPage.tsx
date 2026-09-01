@@ -274,7 +274,7 @@ export function LandingPage() {
                 </div>
                 <h3 className="text-2xl font-bold mb-3" style={{ fontFamily: 'var(--font-display), Georgia, serif' }}>Connect Your Email (Configuration)</h3>
                 <p className="leading-relaxed" style={{ color: 'color-mix(in srgb, var(--bg) 75%, var(--muted))' }}>
-                  Before Cuneihire can send emails for you, you need to give it permission. Go to the <strong>Settings</strong> tab in your dashboard, click &quot;Expand&quot;, and enter your Email provider details. Think of this like giving a robot the keys to your mailbox!
+                  Before Cuneihire can send emails for you, you need to give it permission. Go to the <strong>Settings</strong> tab, open the SMTP Accounts card, and add your email details. Think of this like giving a robot the keys to your mailbox!
                 </p>
               </FadeIn>
             </div>
@@ -288,7 +288,7 @@ export function LandingPage() {
                 </div>
                 <h3 className="text-2xl font-bold mb-3" style={{ fontFamily: 'var(--font-display), Georgia, serif' }}>Find Contacts & Leads</h3>
                 <p className="leading-relaxed" style={{ color: 'color-mix(in srgb, var(--bg) 75%, var(--muted))' }}>
-                  Now you need people to email! Go to the <strong>Scraper & Contacts</strong> tab. You can type in email addresses manually, or turn on the &quot;LinkedIn Scraper&quot; in your Settings. When the scraper is on, Cuneihire acts like a detective and automatically finds new people for you!
+                  Now you need people to email! Go to the <strong>Roles</strong> tab to set up what you&apos;re looking for, then turn on LinkedIn auto-fetch in <strong>Settings</strong>. Once it&apos;s on, Cuneihire acts like a detective and automatically finds new people for you!
                 </p>
               </FadeIn>
             </div>
@@ -302,7 +302,7 @@ export function LandingPage() {
                 </div>
                 <h3 className="text-2xl font-bold mb-3" style={{ fontFamily: 'var(--font-display), Georgia, serif' }}>Set up AI Templates</h3>
                 <p className="leading-relaxed" style={{ color: 'color-mix(in srgb, var(--bg) 75%, var(--muted))' }}>
-                  Instead of writing the same email 100 times, you create a &quot;Template&quot;. Go to the <strong>Templates & AI</strong> tab. Write a basic message like &quot;Hi, I love your work!&quot;. Our Artificial Intelligence will automatically read your template and customize it perfectly for every single person.
+                  Instead of writing the same email 100 times, you create a &quot;Template&quot;. Go to the <strong>Email Templates</strong> tab. Write a basic message like &quot;Hi, I love your work!&quot;. Our Artificial Intelligence will automatically read your template and customize it perfectly for every single person.
                 </p>
               </FadeIn>
             </div>
@@ -316,7 +316,7 @@ export function LandingPage() {
                 </div>
                 <h3 className="text-2xl font-bold mb-3" style={{ fontFamily: 'var(--font-display), Georgia, serif' }}>Press Send (Automail)</h3>
                 <p className="leading-relaxed" style={{ color: 'color-mix(in srgb, var(--bg) 75%, var(--muted))' }}>
-                  Finally, go to the <strong>Sending & Automail</strong> tab. Click &quot;Start Automail&quot;. Once you do this, you can close your computer and go to the beach. Cuneihire will automatically write the emails using AI, and send them out one by one in the background for you. It&apos;s magic!
+                  Finally, go to <strong>Settings</strong> and turn on Automation. Once you do this, you can close your computer and go to the beach. Cuneihire will automatically write the emails using AI, and send them out one by one in the background for you. It&apos;s magic!
                 </p>
               </FadeIn>
             </div>
