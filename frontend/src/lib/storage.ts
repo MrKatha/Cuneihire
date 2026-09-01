@@ -58,9 +58,14 @@ export type PersistedState = {
   // same "not written back by saveAppState" precedent as aiCredits/appCredits above. planTier always has a
   // real value ('free' is genuine, not "unset"); subscriptionStatus/currentPeriodEndsAt are null only for
   // a free account that's never had a subscription at all.
-  planTier: "free" | "pro" | "premium";
+  planTier: "free" | "starter" | "pro" | "elite";
   subscriptionStatus: string | null;
   currentPeriodEndsAt: string | null;
+  // Tier-gated feature ceilings (2026-08-31, operator spec) — same read-only, webhook/admin-granted
+  // precedent as planTier above; the frontend only ever reads these to gate UI, never writes them back.
+  maxFollowUps: number;
+  aiEmailWritingEnabled: boolean;
+  replyMonitoringEnabled: boolean;
   // Open-source job sourcing via JobSpy/Indeed (2026-08-31) — opt-in, additive to autoFetch (the LinkedIn
   // scraper) above, not a replacement. Reuses each role's existing keywords/preferredLocations, no separate
   // config surface. See docs/architecture.md's "Open-source job sourcing" section.
@@ -110,6 +115,9 @@ export function defaultState(): PersistedState {
     planTier: "free",
     subscriptionStatus: null,
     currentPeriodEndsAt: null,
+    maxFollowUps: 3,
+    aiEmailWritingEnabled: true,
+    replyMonitoringEnabled: true,
     jobspySourcingEnabled: false,
     // Loaded/saved separately via loadCandidateProfile/saveCandidateProfile (its own table, own section
     // below) — not part of the app_state round trip any more. Kept here only as the field's shape default.
@@ -208,6 +216,9 @@ export async function loadState(userId: string): Promise<PersistedState> {
     state.planTier = (appState.plan_tier as PersistedState["planTier"]) || "free";
     state.subscriptionStatus = appState.subscription_status ?? null;
     state.currentPeriodEndsAt = appState.current_period_ends_at ?? null;
+    state.maxFollowUps = appState.max_follow_ups ?? 3;
+    state.aiEmailWritingEnabled = appState.ai_email_writing_enabled !== false;
+    state.replyMonitoringEnabled = appState.reply_monitoring_enabled !== false;
     state.jobspySourcingEnabled = appState.jobspy_sourcing_enabled || false;
     // profile is no longer read from app_state — see loadCandidateProfile below. The old candidate_*
     // columns here are left in place, unused, same precedent as every other superseded column this

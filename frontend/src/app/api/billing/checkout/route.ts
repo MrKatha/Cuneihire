@@ -11,8 +11,8 @@ export async function POST(req: Request) {
   }
 
   const { tier } = await req.json();
-  if (tier !== "pro" && tier !== "premium") {
-    return NextResponse.json({ success: false, error: "tier must be 'pro' or 'premium'." }, { status: 400 });
+  if (tier !== "starter" && tier !== "pro" && tier !== "elite") {
+    return NextResponse.json({ success: false, error: "tier must be 'starter', 'pro', or 'elite'." }, { status: 400 });
   }
 
   const { data: { user } } = await supabaseAdmin.auth.admin.getUserById(userId);

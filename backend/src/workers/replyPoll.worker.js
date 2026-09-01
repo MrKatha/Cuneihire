@@ -213,12 +213,17 @@ async function processReplyPollJob(supabase) {
   const userIds = [...new Set(accounts.map((a) => a.user_id))];
   const { data: userStates } = await supabase
     .from("automailsend_app_state")
-    .select("user_id, is_blocked")
+    .select("user_id, is_blocked, reply_monitoring_enabled")
     .in("user_id", userIds);
   const blockedUsers = new Set((userStates || []).filter((u) => u.is_blocked).map((u) => u.user_id));
+  // Tier gate (2026-08-31, operator spec: Starter has no reply monitoring, Pro/Elite do) — an account can
+  // still have imap_enabled=true on its own SMTP config (that toggle isn't hidden retroactively if a
+  // downgrade happens), so this is enforced here too, not just in the Settings UI.
+  const noReplyMonitoringUsers = new Set((userStates || []).filter((u) => u.reply_monitoring_enabled === false).map((u) => u.user_id));
 
   for (const account of accounts) {
     if (blockedUsers.has(account.user_id)) continue;
+    if (noReplyMonitoringUsers.has(account.user_id)) continue;
 
     const logger = new ExecutionLogger(account.user_id, "reply_poll");
     await logger.start(`Checking ${account.label || account.email} for replies...`);

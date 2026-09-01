@@ -26,7 +26,7 @@ type UserState = {
   // Lemon Squeezy subscription (2026-08-31) — webhook-only-writable (never accepted by this route's POST
   // handler), read-only display here. plan_tier always has a real value; the other two are null until a
   // user has ever had a subscription.
-  plan_tier: "free" | "pro" | "premium";
+  plan_tier: "free" | "starter" | "pro" | "elite";
   subscription_status: string | null;
   current_period_ends_at: string | null;
   created_at: string;
@@ -443,8 +443,8 @@ export function AdminPortal({ role }: Props) {
 // Read-only — no editable cell needed here, unlike CreditsCell/OverrideCell (2026-08-31). plan_tier/
 // subscription_status/current_period_ends_at are webhook-only-writable (see admin/users/route.ts's POST
 // handler), so admin edits can never desync them from what Lemon Squeezy actually reports.
-function PlanCell({ tier, status, endsAt }: { tier: "free" | "pro" | "premium"; status: string | null; endsAt: string | null }) {
-  const label = tier === "free" ? "Free" : tier === "pro" ? "Pro" : "Premium";
+function PlanCell({ tier, status, endsAt }: { tier: "free" | "starter" | "pro" | "elite"; status: string | null; endsAt: string | null }) {
+  const label = tier === "free" ? "Free" : tier === "starter" ? "Starter" : tier === "pro" ? "Pro" : "Elite";
   const dateLabel = endsAt ? new Date(endsAt).toLocaleDateString() : null;
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "0.15rem" }}>

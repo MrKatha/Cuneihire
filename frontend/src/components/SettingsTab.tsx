@@ -50,9 +50,12 @@ type Props = {
   passwordLoading: boolean;
   onPasswordChangeSubmit: (e: React.FormEvent) => void;
   // Lemon Squeezy subscription (2026-08-31) — webhook-granted, read-only, see storage.ts's PersistedState.
-  planTier: "free" | "pro" | "premium";
+  planTier: "free" | "starter" | "pro" | "elite";
   subscriptionStatus: string | null;
   currentPeriodEndsAt: string | null;
+  // Tier-gated feature ceilings (2026-08-31, operator spec) — same read-only precedent as planTier above.
+  aiEmailWritingEnabled: boolean;
+  maxFollowUps: number;
   // Open-source job sourcing via JobSpy/Indeed (2026-08-31) — opt-in, additive to the LinkedIn scraper
   // below, not a replacement. Reuses each role's existing keywords, no separate config surface.
   jobspySourcingEnabled: boolean;
@@ -101,6 +104,8 @@ export function SettingsTab({
   planTier,
   subscriptionStatus,
   currentPeriodEndsAt,
+  aiEmailWritingEnabled,
+  maxFollowUps,
   jobspySourcingEnabled,
   onJobspySourcingChange,
 }: Props) {
@@ -207,6 +212,8 @@ export function SettingsTab({
           activeRole={activeRole}
           onActiveRoleChange={onActiveRoleChange}
           onUpdateRoleRules={onUpdateRoleRules}
+          aiWritingAllowed={aiEmailWritingEnabled}
+          maxFollowUps={maxFollowUps}
         />
       </div>
 
