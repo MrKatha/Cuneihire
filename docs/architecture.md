@@ -604,11 +604,28 @@ product. `frontend/src/app/resume-builder/page.tsx` carries real SEO metadata fo
 **Deliberately a separate sibling component, not a rework of `ResumeBuilder.tsx`** — that 1300+-line
 component is woven into roles/candidate-profile/Supabase-save state that doesn't exist for an anonymous
 visitor (same "duplicate rather than risk the live component" call as `jobspy.worker.js` vs.
-`scraper.worker.js` earlier this session). `PublicResumeBuilder.tsx` reuses only the genuinely pure pieces:
-`ModernTemplate`/`ClassicTemplate`, the `useResumeProfilePdf` PDF-generation hook (`generateDownload` needs
-only a `ResumeProfile` shape, no `userId`/upload — already handles pagination/fonts correctly, so this gets
-a pixel-correct PDF for free instead of reinventing `window.print()`), `MarkdownLiteField`, and the
-`ResumeData` type itself — so a draft is trivially the same shape a real saved profile would be.
+`scraper.worker.js` earlier this session).
+
+**First pass (same day) built a simplified, ad-hoc form/preview from scratch — operator feedback: "the
+designs that you have right now on the resume builder are completely cracked," reused only the data types,
+not the real presentation layer. Reworked same day**: `PublicResumeBuilder.tsx` now reuses the ACTUAL
+form-and-preview machinery `ResumeBuilder.tsx` uses — the same exported section components
+(`PersonalInfoSection`/`SummarySection`/`ExperienceSection`/`EducationSection`/`ProjectsSection`/
+`SkillsSection`/`CertificationsSection`/`LanguagesSection`/`StyleSection` — four of these were local-only
+before this rework, now exported from `ResumeBuilder.tsx`, a pure additive change with zero behavior
+change to the authed builder), and the same real A4-proportioned, page-break-aware, zoom-to-fit live
+preview with Content/Style tabs. The pagination effects (the `computePageBreaks` measure effect, the
+`fitScale` `ResizeObserver`, the scroll-sync effect) are copied faithfully from `ResumeBuilder.tsx` into
+`PublicResumeBuilder.tsx` rather than shared through that component directly, since they're pure functions
+of `data`/`templateId` with no role or auth dependency — copying them costs some duplication but carries
+zero risk to the live, daily-used authed builder. Also reused: `ModernTemplate`/`ClassicTemplate`, the
+`useResumeProfilePdf` PDF-generation hook (`generateDownload` needs only a `ResumeProfile` shape, no
+`userId`/upload — already handles pagination/fonts correctly, so this gets a pixel-correct PDF for free
+instead of reinventing `window.print()`), and the `ResumeData` type itself — so a draft is trivially the
+same shape a real saved profile would be. Design is now pixel-identical to the authed builder; only the
+role-linked state underneath (`roleDefs`/`activeRole`/`scratchResumeProfileId`) is replaced with a single,
+role-less local draft — there is no "role" concept for an anonymous visitor, so that part genuinely
+couldn't be reused as-is regardless of design fidelity.
 
 - **Entry points**: Build from profile (checks for a session; if none, sends to `/login?next=/resume-builder`
   — there's no profile to build from anonymously; if logged in, pulls the real `CandidateProfile` via the
