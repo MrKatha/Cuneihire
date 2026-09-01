@@ -997,3 +997,28 @@ alter table public.automailsend_app_state
 -- never collide). Default matches every existing row's true origin (the only pipeline that existed before).
 alter table public.automailsend_job_posts
   add column if not exists source text not null default 'linkedin_scrape'; -- 'linkedin_scrape' | 'jobspy_indeed'
+
+-- Public resume-builder leads (2026-08-31) -- the free/public unauthenticated resume builder
+-- (frontend/src/app/resume-builder) gates its PDF download behind an email, per the operator's lead-gen/
+-- ads-funnel decision (see docs/pricing-tiers.md's "Public resume builder" note and
+-- docs/architecture.md). This is data about NON-users (anonymous visitors), not
+-- automailsend_candidate_profiles -- deliberately its own table, not folded into an existing one.
+-- RLS denies every direct client operation (no policies at all = default-deny under RLS) -- the only
+-- writer is frontend/src/app/api/public/resume-leads/route.ts, using the service-role key server-side,
+-- which also does the actual validation/rate-limiting. ip_address supports that route's simple
+-- "reject if this IP already has a recent row" abuse guard without needing a separate cache/Redis entry.
+create table if not exists public.automailsend_resume_leads (
+  id uuid primary key default gen_random_uuid(),
+  email text not null,
+  resume_data jsonb not null,
+  template_id text not null default 'modern',
+  ip_address text,
+  created_at timestamp with time zone default timezone('utc'::text, now())
+);
+
+alter table public.automailsend_resume_leads enable row level security;
+
+create index if not exists idx_automailsend_resume_leads_created_at
+  on public.automailsend_resume_leads (created_at desc);
+create index if not exists idx_automailsend_resume_leads_email
+  on public.automailsend_resume_leads (email);
