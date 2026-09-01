@@ -2,6 +2,16 @@
 
 Newest on top. Terse bullets only — done / in-progress / locked decisions / open items. Update every phase.
 
+- **2026-09-02 — DONE: fixed scraper bug leaking LinkedIn's own RSC-style "$L<hex>" reference tokens into
+  context_text.** Operator saw literal "$L4 $L13 $L17..." text in the job-post summary; traced to the DB —
+  LinkedIn's post-search response uses a React-Server-Components-style wire format (already documented in
+  `extraction.service.js`), and `extractLineTexts()`'s filter only excluded `"$undefined"`, letting every
+  `$L<hex>` chunk-reference token through as if it were real post text. All 77 job posts + 57/64 recipients
+  in the DB were contaminated. Fixed the filter (requires the "L" so a real "$15/hour" is never at risk,
+  verified against a synthetic sample), hardened the deepest legacy fallback too, deployed via the manual
+  backend workflow, then backfilled all existing contaminated rows in both `automailsend_job_posts` and the
+  denormalized `automailsend_recipients` copy directly against Supabase — confirmed 0 remain. Full
+  breakdown: `docs/architecture.md`.
 - **2026-09-02 — DONE: AI job-post summaries (on-demand+cached), Responses tab threaded, reply toast
   clickable.** Operator: the "job" summary shown was still a plain-code truncation, not AI-written — "AI
   is being used anyway [scraping]... what's happening in the background should not be visible... it's

@@ -2243,3 +2243,32 @@ findings in any touched file (confirmed via full-log grep, not just the tail). N
 `ResponsesTab.tsx`, `JamsHub.tsx`, `JamsTab.tsx`, `app/[[...tab]]/page.tsx`, new
 `app/api/summarize-post/route.ts`, `lib/aiClient.ts`, `lib/types.ts`, `lib/storage.ts`, `app/globals.css`
 (new `.skeleton-line`), both `supabase_setup.sql` files.
+
+## Scraper bug: LinkedIn's own RSC-style reference tokens leaking into context_text (2026-09-02)
+Root cause of the "$L4 $L13 $L17..." garbage the operator reported seeing in the job-post summary — traced
+by pulling the actual contaminated row from the database rather than guessing. LinkedIn's own post-search
+response embeds its data as a React-Server-Components-style wire format (already documented at
+`extraction.service.js:80-87`) — a "children" JSON slot is either literal text or a lazy reference to
+another chunk, serialized as `$L<hexId>`. `extractLineTexts()`'s filter only excluded the literal string
+`"$undefined"`; every `$L<hex>` reference token sailed straight through as if it were a real line of post
+text and got joined into `context_text`. Confirmed live: all 77 job posts and 57 of 64 recipients already
+in the database carried this contamination.
+
+**Fix**: `extractLineTexts()` (the function both `contextTextFor()`/the attribution path and
+`extractPaginatedContacts()` route through) now also excludes anything matching `/^\$L[0-9a-fA-F]+$/` —
+deliberately requires the `L` so a genuine dollar amount like "$15/hour" is never at risk. Also hardened
+`extractInitialContacts()` (the deepest legacy fallback, which never went through `extractLineTexts()` at
+all) with the same strip applied to its raw payload. Verified against a synthetic sample matching the real
+pattern before deploying: reference tokens filtered, real content and a genuine `$15/hour` mention both
+preserved. Deployed via the manual backend workflow (`gh workflow run backend-deploy.yml`) since
+push-triggered auto-deploy is still broken for this fork.
+
+**Backfill**: existing contamination doesn't fix itself — ran a one-time cleanup directly against Supabase
+(`regexp_replace` stripping `\$L[0-9a-fA-F]+` tokens, collapsing the resulting blank lines, `btrim`) against
+both `automailsend_job_posts.context_text` (source of truth) and the denormalized
+`automailsend_recipients.context_text` copy. Dry-run reviewed on live samples before applying for real;
+confirmed 0 contaminated rows remain in either table afterward, including the specific recipient from the
+operator's screenshot. `ai_summary` was untouched by this (already null everywhere at the time — no stale
+AI-generated text needed cleanup, just the raw scraped text it will read from on next generation).
+
+**Files touched**: `backend/src/services/extraction.service.js` only. No schema change.
