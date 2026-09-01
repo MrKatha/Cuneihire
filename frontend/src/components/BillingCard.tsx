@@ -4,20 +4,33 @@ import { useState } from "react";
 import toast from "react-hot-toast";
 import { supabase } from "@/lib/supabase";
 
+type PaidTier = "starter" | "pro" | "elite";
+
 type Props = {
-  planTier: "free" | "pro" | "premium";
+  planTier: "free" | PaidTier;
   subscriptionStatus: string | null;
   currentPeriodEndsAt: string | null;
 };
 
-const TIER_LABEL: Record<Props["planTier"], string> = { free: "Free", pro: "Pro", premium: "Premium" };
+const TIER_LABEL: Record<Props["planTier"], string> = { free: "Free", starter: "Starter", pro: "Pro", elite: "Elite" };
+// Ordered so "Upgrade to X" only ever offers tiers above the current one.
+const TIER_ORDER: Props["planTier"][] = ["free", "starter", "pro", "elite"];
+
+// Module-scope helper (2026-08-31) rather than an inline `window.location.href = url` assignment inside
+// handleUpgrade below — the React Compiler's eslint rule (react-hooks/immutability) mis-flagged that
+// inline form as "modifying a variable defined outside a component," seemingly specific to handleUpgrade
+// being invoked from the higherTiers.map() callback in the JSX below (handleManage's identical inline
+// assignment, called directly rather than via .map(), wasn't flagged). Same fix shape either way.
+function redirectTo(url: string) {
+  window.location.href = url;
+}
 
 // Self-contained (mirrors TwoFactorSettings.tsx's pattern) — SettingsTab.tsx wraps this in its own
 // <Card title="Billing">. planTier/subscriptionStatus/currentPeriodEndsAt come from the app's own state
 // (webhook-granted, read-only — see storage.ts), not fetched separately here. Deliberately minimal UI per
-// the operator's own "even the UI is less of a priority" MVP-push stance — a plan badge and two buttons.
+// the operator's own "even the UI is less of a priority" MVP-push stance — a plan badge and upgrade buttons.
 export function BillingCard({ planTier, subscriptionStatus, currentPeriodEndsAt }: Props) {
-  const [busy, setBusy] = useState<"pro" | "premium" | "portal" | null>(null);
+  const [busy, setBusy] = useState<PaidTier | "portal" | null>(null);
 
   async function authedFetch(path: string, init: RequestInit = {}) {
     const { data: { session } } = await supabase.auth.getSession();
@@ -31,7 +44,7 @@ export function BillingCard({ planTier, subscriptionStatus, currentPeriodEndsAt 
     });
   }
 
-  async function handleUpgrade(tier: "pro" | "premium") {
+  async function handleUpgrade(tier: PaidTier) {
     setBusy(tier);
     try {
       const res = await authedFetch("/api/billing/checkout", { method: "POST", body: JSON.stringify({ tier }) });
@@ -41,7 +54,7 @@ export function BillingCard({ planTier, subscriptionStatus, currentPeriodEndsAt 
         setBusy(null);
         return;
       }
-      window.location.href = data.url;
+      redirectTo(data.url);
     } catch {
       toast.error("Network error starting checkout");
       setBusy(null);
@@ -58,7 +71,7 @@ export function BillingCard({ planTier, subscriptionStatus, currentPeriodEndsAt 
         setBusy(null);
         return;
       }
-      window.location.href = data.url;
+      redirectTo(data.url);
     } catch {
       toast.error("Network error opening your billing portal");
       setBusy(null);
@@ -67,6 +80,7 @@ export function BillingCard({ planTier, subscriptionStatus, currentPeriodEndsAt 
 
   const isCancelled = subscriptionStatus === "cancelled";
   const periodLabel = currentPeriodEndsAt ? new Date(currentPeriodEndsAt).toLocaleDateString() : null;
+  const higherTiers = TIER_ORDER.slice(TIER_ORDER.indexOf(planTier) + 1) as PaidTier[];
 
   return (
     <div>
@@ -80,33 +94,24 @@ export function BillingCard({ planTier, subscriptionStatus, currentPeriodEndsAt 
         )}
       </div>
 
-      {planTier === "free" && (
-        <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
-          <button type="button" className="btn primary small" onClick={() => handleUpgrade("pro")} disabled={busy !== null}>
-            {busy === "pro" ? "Starting…" : "Upgrade to Pro"}
+      <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+        {higherTiers.map((t, i) => (
+          <button
+            key={t}
+            type="button"
+            className={i === 0 ? "btn primary small" : "btn ghost small"}
+            onClick={() => handleUpgrade(t)}
+            disabled={busy !== null}
+          >
+            {busy === t ? "Starting…" : `Upgrade to ${TIER_LABEL[t]}`}
           </button>
-          <button type="button" className="btn ghost small" onClick={() => handleUpgrade("premium")} disabled={busy !== null}>
-            {busy === "premium" ? "Starting…" : "Upgrade to Premium"}
-          </button>
-        </div>
-      )}
-
-      {planTier === "pro" && (
-        <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
-          <button type="button" className="btn primary small" onClick={() => handleUpgrade("premium")} disabled={busy !== null}>
-            {busy === "premium" ? "Starting…" : "Upgrade to Premium"}
-          </button>
+        ))}
+        {planTier !== "free" && (
           <button type="button" className="btn ghost small" onClick={handleManage} disabled={busy !== null}>
             {busy === "portal" ? "Opening…" : "Manage subscription"}
           </button>
-        </div>
-      )}
-
-      {planTier === "premium" && (
-        <button type="button" className="btn ghost small" onClick={handleManage} disabled={busy !== null}>
-          {busy === "portal" ? "Opening…" : "Manage subscription"}
-        </button>
-      )}
+        )}
+      </div>
     </div>
   );
 }

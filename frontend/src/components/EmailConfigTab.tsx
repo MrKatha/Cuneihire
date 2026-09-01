@@ -17,13 +17,21 @@ type Props = {
   activeRole: Role;
   onActiveRoleChange: (role: Role) => void;
   onUpdateRoleRules: (id: string, patch: Partial<RoleDef>) => void;
+  // The tier's ceiling on any AI-touched send content (2026-08-31, operator spec: Starter has none, Pro/
+  // Elite do) — gates both "Let AI choose" and "Let AI write it" here; "Manual" is always available on
+  // every tier. Separate from the AI tab's own on/off preference, which still applies within this ceiling.
+  aiWritingAllowed: boolean;
+  // The tier's cap on how many of the 3 follow-up slots actually fire (2026-08-31, operator spec: Starter
+  // 0 / Pro 1 / Elite 3) — enforced for real in backend/src/workers/followUp.worker.js; this just keeps
+  // the UI from letting someone configure slots that would silently never send.
+  maxFollowUps: number;
 };
 
 // The Email Templates tab's "Configuration" sub-tab (2026-08-20, operator ask — mirrors the Resumes tab's
 // own two-sub-tab split, Builder/Library). Purely "how does this role send" — which template(s) themselves live on
 // the sibling "Templates" sub-tab (RoleTemplates.tsx); this one just owns RoleDef.emailSendMode per role,
 // via the same shared `activeRole` state so switching role here stays in sync with Templates/Roles.
-export function EmailConfigTab({ recipients, templates, roleDefs, activeRole, onActiveRoleChange, onUpdateRoleRules }: Props) {
+export function EmailConfigTab({ recipients, templates, roleDefs, activeRole, onActiveRoleChange, onUpdateRoleRules, aiWritingAllowed, maxFollowUps }: Props) {
   const counts = useMemo(() => {
     const map: Record<Role, number> = {};
     roleDefs.forEach((def) => { map[def.key] = 0; });
@@ -90,21 +98,25 @@ export function EmailConfigTab({ recipients, templates, roleDefs, activeRole, on
             <h3>How does &quot;{roleLabel(roleDefs, activeRole)}&quot; send emails?</h3>
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
-            {EMAIL_SEND_MODES.map((m) => (
-              <label key={m.value} style={{ display: "flex", gap: "0.5rem", alignItems: "flex-start", cursor: "pointer" }}>
-                <input
-                  type="radio"
-                  name="emailSendMode"
-                  checked={activeRoleDef.emailSendMode === m.value}
-                  onChange={() => handleModeChange(m.value)}
-                  style={{ marginTop: "0.25rem" }}
-                />
-                <span>
-                  <strong style={{ fontSize: "0.82rem" }}>{m.label}</strong>
-                  <div className="hint compact" style={{ margin: 0 }}>{m.hint}</div>
-                </span>
-              </label>
-            ))}
+            {EMAIL_SEND_MODES.map((m) => {
+              const locked = m.value !== "manual" && !aiWritingAllowed;
+              return (
+                <label key={m.value} style={{ display: "flex", gap: "0.5rem", alignItems: "flex-start", cursor: locked ? "not-allowed" : "pointer", opacity: locked ? 0.55 : 1 }}>
+                  <input
+                    type="radio"
+                    name="emailSendMode"
+                    checked={activeRoleDef.emailSendMode === m.value}
+                    onChange={() => handleModeChange(m.value)}
+                    disabled={locked}
+                    style={{ marginTop: "0.25rem" }}
+                  />
+                  <span>
+                    <strong style={{ fontSize: "0.82rem" }}>{m.label}</strong>
+                    <div className="hint compact" style={{ margin: 0 }}>{locked ? "Not included on your current plan." : m.hint}</div>
+                  </span>
+                </label>
+              );
+            })}
           </div>
           {activeRoleDef.emailSendMode === "ai-write" && (
             <p className="hint compact" style={{ marginTop: "0.6rem" }}>
@@ -122,24 +134,30 @@ export function EmailConfigTab({ recipients, templates, roleDefs, activeRole, on
           <div className="template-head">
             <h3>Follow-ups for &quot;{roleLabel(roleDefs, activeRole)}&quot;</h3>
           </div>
-          <label className="field" style={{ maxWidth: "280px" }}>
-            <span>Wait between follow-ups (days)</span>
-            <input
-              type="number"
-              min={1}
-              placeholder="Off"
-              value={activeRoleDef.followUpIntervalDays ?? ""}
-              onChange={(e) => handleFollowUpIntervalChange(e.target.value)}
-            />
-          </label>
-          <p className="hint compact" style={{ margin: "0.4rem 0 0" }}>
-            Leave blank to turn follow-ups off for this role. When set, up to 3 follow-ups go out on this
-            interval to any recipient who hasn&apos;t replied. Each costs an app credit; an AI-written one
-            also costs an AI credit.
-          </p>
-          {activeRoleDef.followUpIntervalDays != null && (
+          {maxFollowUps <= 0 ? (
+            <p className="hint compact" style={{ margin: 0 }}>Follow-ups aren&apos;t included on your current plan.</p>
+          ) : (
+            <>
+              <label className="field" style={{ maxWidth: "280px" }}>
+                <span>Wait between follow-ups (days)</span>
+                <input
+                  type="number"
+                  min={1}
+                  placeholder="Off"
+                  value={activeRoleDef.followUpIntervalDays ?? ""}
+                  onChange={(e) => handleFollowUpIntervalChange(e.target.value)}
+                />
+              </label>
+              <p className="hint compact" style={{ margin: "0.4rem 0 0" }}>
+                Leave blank to turn follow-ups off for this role. When set, up to {maxFollowUps} follow-up
+                {maxFollowUps === 1 ? "" : "s"} go out on this interval to any recipient who hasn&apos;t
+                replied. Each costs an app credit; an AI-written one also costs an AI credit.
+              </p>
+            </>
+          )}
+          {maxFollowUps > 0 && activeRoleDef.followUpIntervalDays != null && (
             <div style={{ display: "flex", flexDirection: "column", gap: "0.6rem", marginTop: "0.75rem" }}>
-              {([1, 2, 3] as const).map((slot) => {
+              {([1, 2, 3] as const).slice(0, maxFollowUps).map((slot) => {
                 const field = (`followUpTemplate${slot}Id`) as "followUpTemplate1Id" | "followUpTemplate2Id" | "followUpTemplate3Id";
                 return (
                   <label key={slot} className="field">

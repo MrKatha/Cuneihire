@@ -48,7 +48,11 @@ async function runAutomailJobs(supabase) {
 
       // Platform-managed AI (2026-08-18) — no more per-user provider/key, just an enable toggle + a
       // credit balance spent via spendAiCredit() after each successful Gemini call. See aiCredits.js.
-      const aiEnabled = !!user.ai_personalization_enabled;
+      // ai_email_writing_enabled (2026-08-31, operator spec) is the TIER's ceiling on AI-written content —
+      // separate from ai_personalization_enabled, which is the user's own on/off preference and also gates
+      // AI job-match scoring elsewhere (scraper.worker.js/jobspy.worker.js), unaffected by this. A Starter
+      // account can have AI scoring on but still can't get AI-written emails.
+      const aiEnabled = !!user.ai_personalization_enabled && user.ai_email_writing_enabled !== false;
       const aiTemperature = typeof user.ai_temperature === "number" ? user.ai_temperature : 0.4;
       // AI tab (2026-08-18) — a recipient whose scored job post falls below this is skipped entirely by
       // this fully-automated loop (never applied to JAMS's manual/bulk sends in batchSend.worker.js). 0

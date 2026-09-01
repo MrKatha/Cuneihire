@@ -1022,3 +1022,21 @@ create index if not exists idx_automailsend_resume_leads_created_at
   on public.automailsend_resume_leads (created_at desc);
 create index if not exists idx_automailsend_resume_leads_email
   on public.automailsend_resume_leads (email);
+
+-- Tier-gated feature limits (2026-08-31, operator spec) -- three new per-account levers on top of the
+-- existing four (ai_credits/max_keywords/min_fetch_interval_override/daily_mail_limit), plus one new
+-- global ceiling. All default to values that preserve today's behavior for existing/unassigned accounts
+-- (nothing regresses for anyone until a real Starter/Pro/Elite tier is actually assigned) -- see
+-- frontend/src/lib/lemonSqueezy.ts's TIER_LEVERS for the real per-tier values and docs/pricing-tiers.md
+-- for the full spec.
+alter table public.automailsend_app_state
+  add column if not exists max_follow_ups integer not null default 3,
+  add column if not exists ai_email_writing_enabled boolean not null default true,
+  add column if not exists reply_monitoring_enabled boolean not null default true;
+
+-- One SMTP account per user for now, globally, regardless of tier -- operator: "no SMTP addition... at
+-- the moment... once we have other functions... down, we can add the update to add multiple SMTPs."
+-- Deliberately a global admin-adjustable setting (mirrors max_daily_send_limit's existing shape), not a
+-- per-tier column, since this is explicitly a temporary, blanket cap rather than a tier differentiator.
+alter table public.automailsend_global_settings
+  add column if not exists max_smtp_accounts_per_user integer not null default 1;

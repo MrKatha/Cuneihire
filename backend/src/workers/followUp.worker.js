@@ -27,6 +27,11 @@ function getStartOfDayUTC() {
   return d.toISOString();
 }
 
+// Per-tier cap now (2026-08-31, operator spec: Starter 0 / Pro 1 / Elite 3) — automailsend_app_state.
+// max_follow_ups, read per-user below (`user.max_follow_ups`), replaces this as a flat constant. Kept only
+// as the ceiling nothing should exceed regardless of tier — the 3 follow_up_template_N_id slots on
+// automailsend_role_defs are hardcoded to 3 (see that table's schema comment), so a tier granting more
+// than this would need new template slots too, not just a bigger number here.
 const MAX_FOLLOW_UPS = 3;
 // On an SMTP failure, don't leave next_follow_up_at "already due" forever (a broken address would get
 // hammered every tick) — push it forward by a short fixed backoff instead. Distinct from the credit-
@@ -67,8 +72,20 @@ async function runFollowUpJobs(supabase) {
         .single();
       if (!user || user.is_blocked) continue;
 
-      const aiEnabled = !!user.ai_personalization_enabled;
+      // ai_email_writing_enabled (2026-08-31, operator spec) is the TIER's ceiling on AI-written content —
+      // separate from ai_personalization_enabled, which is the user's own on/off preference and also gates
+      // AI job-match scoring elsewhere (scraper.worker.js/jobspy.worker.js), unaffected by this. A Starter
+      // account can have AI scoring on but still can't get AI-written follow-ups.
+      const aiEnabled = !!user.ai_personalization_enabled && user.ai_email_writing_enabled !== false;
       const aiTemperature = typeof user.ai_temperature === "number" ? user.ai_temperature : 0.4;
+      // Tier-driven cap (2026-08-31) — clamped against MAX_FOLLOW_UPS since only 3 template slots exist
+      // regardless of what a future tier might claim; a Starter user's 0 means the query below matches
+      // nothing, which is exactly "no follow-ups," not an error case.
+      const maxFollowUpsForUser = Math.min(
+        typeof user.max_follow_ups === "number" ? user.max_follow_ups : MAX_FOLLOW_UPS,
+        MAX_FOLLOW_UPS
+      );
+      if (maxFollowUpsForUser <= 0) continue;
 
       const { data: candidateProfileRow } = await supabase
         .from("automailsend_candidate_profiles")
@@ -99,7 +116,7 @@ async function runFollowUpJobs(supabase) {
         .eq("user_id", userId)
         .eq("status", "sent")
         .eq("has_replied", false)
-        .lt("follow_up_count", MAX_FOLLOW_UPS)
+        .lt("follow_up_count", maxFollowUpsForUser)
         .not("next_follow_up_at", "is", null)
         .lte("next_follow_up_at", nowIso)
         .limit(totalRemaining * 3);

@@ -188,16 +188,24 @@ export default function Home() {
   const [planTier, setPlanTier] = useState(defaultState().planTier);
   const [subscriptionStatus, setSubscriptionStatus] = useState(defaultState().subscriptionStatus);
   const [currentPeriodEndsAt, setCurrentPeriodEndsAt] = useState(defaultState().currentPeriodEndsAt);
+  // Tier-gated feature ceilings (2026-08-31) — same webhook/admin-granted, read-only-from-here precedent.
+  const [maxFollowUps, setMaxFollowUps] = useState(defaultState().maxFollowUps);
+  const [aiEmailWritingEnabled, setAiEmailWritingEnabled] = useState(defaultState().aiEmailWritingEnabled);
+  const [replyMonitoringEnabled, setReplyMonitoringEnabled] = useState(defaultState().replyMonitoringEnabled);
   const [jobspySourcingEnabled, setJobspySourcingEnabled] = useState(defaultState().jobspySourcingEnabled);
   // Automation's daily-limit ceiling, shown on JAMS's Overview sub-tab (2026-08-25) — admin-configurable,
   // one global number for now (no billing/plan system yet). Public route, no auth needed, same as
   // allow_signups on the signup page.
   const [globalMaxDailyLimit, setGlobalMaxDailyLimit] = useState(100);
+  // One SMTP account per user for now, globally, regardless of tier (2026-08-31) — see
+  // docs/pricing-tiers.md. Same public-settings fetch as globalMaxDailyLimit above.
+  const [maxSmtpAccounts, setMaxSmtpAccounts] = useState(1);
   useEffect(() => {
     fetch("/api/public/settings")
       .then((res) => res.json())
       .then((data) => {
         if (data.success && data.data.max_daily_send_limit) setGlobalMaxDailyLimit(data.data.max_daily_send_limit);
+        if (data.success && data.data.max_smtp_accounts_per_user) setMaxSmtpAccounts(data.data.max_smtp_accounts_per_user);
       })
       .catch(() => {});
   }, []);
@@ -332,6 +340,9 @@ export default function Home() {
       setPlanTier(saved.planTier);
       setSubscriptionStatus(saved.subscriptionStatus);
       setCurrentPeriodEndsAt(saved.currentPeriodEndsAt);
+      setMaxFollowUps(saved.maxFollowUps);
+      setAiEmailWritingEnabled(saved.aiEmailWritingEnabled);
+      setReplyMonitoringEnabled(saved.replyMonitoringEnabled);
       setJobspySourcingEnabled(saved.jobspySourcingEnabled);
       setRoleDefs(saved.roleDefs);
       setSmtpAccounts(saved.smtpAccounts);
@@ -580,6 +591,9 @@ export default function Home() {
         planTier, // not saved in app_state — webhook-granted, read-only from here
         subscriptionStatus, // not saved in app_state — webhook-granted, read-only from here
         currentPeriodEndsAt, // not saved in app_state — webhook-granted, read-only from here
+        maxFollowUps, // not saved in app_state — webhook/admin-granted, read-only from here
+        aiEmailWritingEnabled, // not saved in app_state — webhook/admin-granted, read-only from here
+        replyMonitoringEnabled, // not saved in app_state — webhook/admin-granted, read-only from here
         jobspySourcingEnabled,
         profile,
         batchSendPending: sending,
@@ -1065,6 +1079,8 @@ export default function Home() {
                   activeRole={activeTemplateRole}
                   onActiveRoleChange={setActiveTemplateRole}
                   onUpdateRoleRules={handleUpdateRoleRules}
+                  aiWritingAllowed={aiEmailWritingEnabled}
+                  maxFollowUps={maxFollowUps}
                 />
               )}
             </section>
@@ -1133,6 +1149,8 @@ export default function Home() {
               planTier={planTier}
               subscriptionStatus={subscriptionStatus}
               currentPeriodEndsAt={currentPeriodEndsAt}
+              aiEmailWritingEnabled={aiEmailWritingEnabled}
+              maxFollowUps={maxFollowUps}
               jobspySourcingEnabled={jobspySourcingEnabled}
               onJobspySourcingChange={setJobspySourcingEnabled}
             />
@@ -1151,6 +1169,8 @@ export default function Home() {
           {showSmtpModal && (
             <SmtpConfigPanel
               accounts={smtpAccounts}
+              maxAccounts={maxSmtpAccounts}
+              replyMonitoringAllowed={replyMonitoringEnabled}
               onSaveAccount={handleSaveSmtpAccount}
               onDeleteAccount={handleDeleteSmtpAccount}
               onResetAll={resetAll}

@@ -199,7 +199,11 @@ async function processBatchSendJob(job) {
         if (!tpl) continue;
       } else if (sendMode === "ai-select") {
         if (roleTemplates.length === 0) continue;
-        if (userState.ai_personalization_enabled && userState.ai_credits > 0) {
+        // ai_email_writing_enabled (2026-08-31, operator spec) -- the tier's ceiling on any AI-touched
+        // email content, template selection included; ai_personalization_enabled stays the user's own
+        // on/off preference and also gates AI job-match scoring elsewhere, unaffected by this.
+        const aiWritingAllowed = userState.ai_personalization_enabled && userState.ai_email_writing_enabled !== false;
+        if (aiWritingAllowed && userState.ai_credits > 0) {
           try {
             tpl = await chooseTemplateForJob(roleTemplates, recipient.role, recipient.context_text, userState.ai_temperature, user_id);
             if (tpl) {
@@ -209,7 +213,7 @@ async function processBatchSendJob(job) {
           } catch (err) {
             console.error(pc.red(`[BatchSend] AI template choice failed for ${recipient.email}: ${err.message}. Falling back to the first template.`));
           }
-        } else if (userState.ai_personalization_enabled) {
+        } else if (aiWritingAllowed) {
           // 2026-08-31: was a silent fallback with zero log line — now visible, matching automail.worker.js.
           console.log(pc.yellow(`[BatchSend] Out of AI credits — falling back to the first template for ${recipient.email}.`));
         }
@@ -227,7 +231,7 @@ async function processBatchSendJob(job) {
       let templateLabelForLog;
 
       if (sendMode === "ai-write") {
-        if (!userState.ai_personalization_enabled || !(userState.ai_credits > 0)) {
+        if (!userState.ai_personalization_enabled || userState.ai_email_writing_enabled === false || !(userState.ai_credits > 0)) {
           // 2026-08-31: was a bare continue with zero log line — now visible, matching automail.worker.js's
           // ai-write WARN. Deliberately no status change / no sent_log row — same admin-recoverable policy.
           console.log(pc.yellow(`[BatchSend] Out of AI credits — skipping AI-write for ${recipient.email}.`));

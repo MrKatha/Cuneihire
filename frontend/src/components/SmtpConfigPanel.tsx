@@ -8,6 +8,16 @@ import { HelpTooltip } from "./HelpTooltip";
 
 type Props = {
   accounts: SmtpAccount[];
+  // One SMTP account per user for now, globally, regardless of tier (2026-08-31) — see
+  // docs/pricing-tiers.md. A UI-level gate only (hides/disables "+ Add account" once at the cap); there's
+  // no server-side enforcement yet since accounts save via a direct RLS-protected Supabase insert with no
+  // API route in between to check against — acceptable for now since this is explicitly a temporary,
+  // blanket cap, not a hard abuse boundary.
+  maxAccounts: number;
+  // Reply monitoring gated by tier now too (2026-08-31, operator spec: Starter has none, Pro/Elite do) --
+  // separate from canMonitorReplies below, which is about provider capability (SendGrid/Resend have no
+  // inbox to poll), not tier. Both must be true for the checkbox to actually be usable.
+  replyMonitoringAllowed: boolean;
   onSaveAccount: (
     account: Partial<SmtpAccount> & { id?: string; email: string; appPassword: string }
   ) => Promise<SmtpAccount | null>;
@@ -31,7 +41,7 @@ const SANITIZE_REGEX = /[^a-zA-Z0-9!@#$%^&*()_+\-=[\]{};':"\\|,.<>/? ]/g;
 // Settings, enforced backend-side in automail.worker.js.
 const DEFAULT_DAILY_LIMIT = 50;
 
-export function SmtpConfigPanel({ accounts, onSaveAccount, onDeleteAccount, onResetAll, onClose }: Props) {
+export function SmtpConfigPanel({ accounts, maxAccounts, replyMonitoringAllowed, onSaveAccount, onDeleteAccount, onResetAll, onClose }: Props) {
   const [mounted, setMounted] = useState(false);
   const [view, setView] = useState<"list" | "form">(accounts.length === 0 ? "form" : "list");
   const [editingId, setEditingId] = useState<string | undefined>(undefined);
@@ -150,7 +160,7 @@ export function SmtpConfigPanel({ accounts, onSaveAccount, onDeleteAccount, onRe
         dailyLimit: DEFAULT_DAILY_LIMIT,
         isVerified: true,
         isActive: true,
-        imapEnabled: canMonitorReplies && imapEnabled,
+        imapEnabled: canMonitorReplies && replyMonitoringAllowed && imapEnabled,
         imapHost: imapHost.trim() || undefined,
         imapPort,
       });
@@ -241,10 +251,16 @@ export function SmtpConfigPanel({ accounts, onSaveAccount, onDeleteAccount, onRe
                   ))}
                 </ul>
               )}
-              <div className="row">
-                <button type="button" className="btn primary" onClick={openAddForm} id="tour-smtp-add">
-                  + Add account
-                </button>
+              <div className="row" style={{ alignItems: "center", flexWrap: "wrap" }}>
+                {accounts.length < maxAccounts ? (
+                  <button type="button" className="btn primary" onClick={openAddForm} id="tour-smtp-add">
+                    + Add account
+                  </button>
+                ) : (
+                  <span className="hint compact">
+                    {maxAccounts === 1 ? "One SMTP account at a time for now." : `Up to ${maxAccounts} SMTP accounts for now.`}
+                  </span>
+                )}
                 <button type="button" className="btn ghost danger" onClick={handleReset}>
                   Reset all
                 </button>
@@ -366,7 +382,16 @@ export function SmtpConfigPanel({ accounts, onSaveAccount, onDeleteAccount, onRe
                   </div>
                 </label>
 
-                {canMonitorReplies ? (
+                {!canMonitorReplies ? (
+                  <p className="hint compact" style={{ gridColumn: "1 / -1" }}>
+                    Reply monitoring isn&apos;t available for {currentProvider.name} — it&apos;s a relay
+                    service with no inbox to check.
+                  </p>
+                ) : !replyMonitoringAllowed ? (
+                  <p className="hint compact" style={{ gridColumn: "1 / -1" }}>
+                    Reply monitoring isn&apos;t included on your current plan.
+                  </p>
+                ) : (
                   <label className="field" style={{ gridColumn: "1 / -1" }}>
                     <span>
                       Enable reply monitoring
@@ -394,14 +419,9 @@ export function SmtpConfigPanel({ accounts, onSaveAccount, onDeleteAccount, onRe
                       </span>
                     </div>
                   </label>
-                ) : (
-                  <p className="hint compact" style={{ gridColumn: "1 / -1" }}>
-                    Reply monitoring isn&apos;t available for {currentProvider.name} — it&apos;s a relay
-                    service with no inbox to check.
-                  </p>
                 )}
 
-                {canMonitorReplies && imapEnabled && provider === "custom" && (
+                {canMonitorReplies && replyMonitoringAllowed && imapEnabled && provider === "custom" && (
                   <>
                     <label className="field">
                       <span>IMAP Host</span>
