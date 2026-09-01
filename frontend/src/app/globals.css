@@ -585,7 +585,10 @@ body {
   top: 0;
   right: 0;
   height: 100vh;
-  width: min(460px, 100vw);
+  /* Widened 2026-09-02 (operator ask — "expand the right section, at least covering half...with more
+     space to fit things"): roughly half the viewport on a normal desktop width, never below the original
+     460px on a narrow one, capped so it doesn't sprawl on an ultra-wide monitor. */
+  width: clamp(460px, 50vw, 760px);
   background: var(--bg-panel);
   border-left: 1px solid var(--line);
   box-shadow: -18px 0 50px color-mix(in srgb, #000 20%, transparent);
