@@ -1,17 +1,21 @@
 @import "tailwindcss";
 
+/* Palette "Signal" (2026-09-01, operator-picked from 3 candidates — see docs/design.md). Crisp near-white
+   paper + dark neutral ink + a deep teal accent, replacing the old warm-cream/near-black/terracotta set
+   (operator: "I don't like the colors at all" — that set read close to a generic cream-serif-terracotta
+   AI-design default). Accent checked AA (4.5:1+) against both white button text and this bg. */
 :root {
-  --bg: #faf9f6;
+  --bg: #f4f5f5;
   --bg-elevated: #ffffff;
   --bg-panel: #ffffff;
-  --ink: #16140f;
-  --muted: #7a7568;
-  --line: #e5e1d6;
-  --accent: #c9520e;
+  --ink: #181c1b;
+  --muted: #6e7574;
+  --line: #dde2e1;
+  --accent: #0f7a6e;
   --accent-ink: #ffffff;
-  --warn: #c8960e;
-  --danger: #b23a4a;
-  --ok: #1e8a5c;
+  --warn: #b8860c;
+  --danger: #c23b4e;
+  --ok: #2e8f5c;
 }
 
 @theme inline {

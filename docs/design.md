@@ -16,10 +16,18 @@
   own agency **Cuneihive** (see global CLAUDE.md), but a deliberately different register — Cuneihive's own
   sites (reference pulled from `F:\Cuneihive-V3`, a separate local repo) read as premium/agency, wrong for a
   tool used daily. Full rationale, palette source, and locked decisions: `docs/memory.md`.
-- **Tokens** (`frontend/src/app/globals.css` `:root`): warm near-black ink `#16140f`, warm paper `#faf9f6`,
-  one accent — copper-orange `#c9520e` (AA-contrast-checked against both white text and the paper bg) — used
-  sparingly (primary CTA, active states, hexagon mark), hairline border `#e5e1d6`. Status colors keep distinct
-  hues from the accent: ok `#1e8a5c`, warn `#c8960e`, danger `#b23a4a`.
+- **Tokens — palette "Signal" (2026-09-01, LOCKED, supersedes the original 2026-08-17 set below)**
+  (`frontend/src/app/globals.css` `:root`): dark neutral ink `#181c1b`, crisp near-white paper `#f4f5f5`,
+  one accent — deep teal `#0f7a6e` (AA-contrast-checked: 5.2:1 against white button text, 4.8:1 as text on
+  the paper bg) — used sparingly (primary CTA, active states, hexagon mark), hairline border `#dde2e1`.
+  Status colors: ok `#2e8f5c`, warn `#b8860c`, danger `#c23b4e`. Picked by the operator from 3 real
+  candidates mocked up with actual app components (nav/panel/buttons/badges), not abstract swatches — see
+  `docs/memory.md`'s top entry. Type/layout/motif below are unchanged by this — colors only.
+  <details><summary>Original 2026-08-17 palette (retired 2026-09-01)</summary>
+  Warm near-black ink `#16140f`, warm paper `#faf9f6`, copper-orange accent `#c9520e`, hairline border
+  `#e5e1d6`, status colors ok `#1e8a5c` / warn `#c8960e` / danger `#b23a4a`. Retired because the operator
+  didn't like it — in hindsight it read close to a generic cream-serif-terracotta AI-design default.
+  </details>
 - **Structure: soft, not sharp (corrected 2026-08-17)** — the first pass used a hard "sharp corners
   everywhere" lock; operator feedback was it read too boxy for this SaaS. Reverted to moderate rounding
   (~8px controls, ~10-16px cards/modals, pill badges/chips/progress) in `globals.css`'s shared classes, modal
@@ -45,12 +53,14 @@
   not just a redundant restatement of it. **Reverted to the coded hex mark** (this file's HexMark.tsx is
   back to the pre-9/1 shape) as a neutral placeholder — operator is sourcing a genuinely different logo
   separately. Don't re-introduce the Cuneihive glyph without being asked again.
-- **Color palette is being reworked (started 2026-09-01, operator directive: "I don't like the colors at
-  all")** — current tokens (warm cream bg + near-black ink + terracotta/copper accent + serif display) sit
-  close to a recognizable generic-AI-design formula (cream/serif/terracotta), which may be part of what
-  reads as "not it." New direction TBD — see `docs/memory.md`'s top entry for where this stands; once a
-  direction is picked, this section gets updated with the real locked tokens and that becomes the standard
-  every future module/update follows (per operator: finalize once, then stay consistent with it).
+- **Color palette LOCKED 2026-09-01 — "Signal"**: see the Tokens bullet above for the real values. Operator
+  picked it from 3 candidates the same day. This is now the standard — any new module or update to an
+  existing one follows these tokens (never a one-off hardcoded hex), per the operator's own instruction to
+  finalize once and stay consistent. Favicon (`frontend/src/app/icon.svg`) updated to match; resume-document
+  templates (`frontend/src/lib/resumeTemplates/*.tsx`) deliberately NOT touched — those are each their own
+  independent document style for the exported resume PDF, not app UI chrome, and were never tied to these
+  tokens even before this change (`ClassicTemplate.tsx` has always used its own greyscale, unrelated to
+  `--accent`).
 
 ## This project
 - The core flow is exactly the seed pattern: **SMTP Config → Recipients → Role Templates → Send**, all inside
