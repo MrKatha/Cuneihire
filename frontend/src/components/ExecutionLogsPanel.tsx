@@ -2,13 +2,82 @@ import { useEffect, useState, useRef, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
 import { toast } from "react-hot-toast";
 
+type ExecutionLogDetails = {
+  jobType?: string;
+  logs?: string[];
+  new_emails?: string[];
+  new_phones?: string[];
+  [key: string]: unknown;
+};
+
 interface ExecutionLog {
   id: string;
   user_id: string;
   status: string;
   message: string;
-  details: any;
+  details: ExecutionLogDetails | null;
   created_at: string;
+}
+
+// What each background job actually is, in plain language — the raw `jobType` values
+// ("scraper"/"jobspy"/"automail"/"follow_up"/"reply_poll") come straight from each worker file's own
+// `new ExecutionLogger(userId, "...")` call (backend/src/workers/*.worker.js), a developer-facing id, not
+// something written for a candidate to read.
+const JOB_TYPE_LABELS: Record<string, string> = {
+  scraper: "LinkedIn search",
+  jobspy: "Job board search",
+  automail: "Sending emails",
+  follow_up: "Sending follow-ups",
+  reply_poll: "Checking for replies",
+};
+
+function jobTypeLabel(jobType?: string) {
+  if (!jobType) return "Background task";
+  return JOB_TYPE_LABELS[jobType] || jobType.replace(/_/g, " ");
+}
+
+const STATUS_LABELS: Record<string, string> = {
+  running: "In progress",
+  success: "Completed",
+  error: "Failed",
+};
+
+function statusLabel(status: string) {
+  return STATUS_LABELS[status.toLowerCase()] || status;
+}
+
+function statusColor(status: string) {
+  switch (status.toLowerCase()) {
+    case "running":
+      return "var(--accent)";
+    case "success":
+      return "var(--ok)";
+    case "error":
+      return "var(--danger)";
+    default:
+      return "var(--muted)";
+  }
+}
+
+// Backend messages are already close to plain English (see logger.js) but a few carry over
+// developer-facing words ("Execution", "batch", "unique records"). Known patterns get reworded; anything
+// unrecognized (a message shape added later, say) just passes through unchanged rather than being hidden.
+function humanizeMessage(message: string): string {
+  const patterns: [RegExp, (m: RegExpMatchArray) => string][] = [
+    [/^Execution started for (\d+) keyword\(s\) across (\d+) role\(s\)$/, (m) => `Started — searching ${m[1]} keyword(s) across ${m[2]} role(s)`],
+    [/^Execution finished\. Inserted (\d+) new unique records?\.$/, (m) => `Found ${m[1]} new contact${m[1] === "1" ? "" : "s"}`],
+    [/^Execution failed: (.+)$/, (m) => `Something went wrong: ${m[1]}`],
+    [/^Starting Automail batch process\.\.\.$/, () => "Started sending emails…"],
+    [/^Finished batch\. Sent: (\d+)$/, (m) => `Sent ${m[1]} email${m[1] === "1" ? "" : "s"}`],
+    [/^Starting follow-up batch process\.\.\.$/, () => "Started sending follow-ups…"],
+    [/^Finished follow-up batch\. Sent: (\d+)$/, (m) => `Sent ${m[1]} follow-up${m[1] === "1" ? "" : "s"}`],
+    [/^Error fetching templates$/, () => "Couldn't load your email templates"],
+  ];
+  for (const [re, fn] of patterns) {
+    const m = message.match(re);
+    if (m) return fn(m);
+  }
+  return message;
 }
 
 export function ExecutionLogsPanel({ userId }: { userId: string }) {
@@ -19,7 +88,7 @@ export function ExecutionLogsPanel({ userId }: { userId: string }) {
   const [intervalMin, setIntervalMin] = useState<number | null>(null);
   const [timeLeft, setTimeLeft] = useState<string>("Calculating...");
   const limit = 50;
-  
+
   const observer = useRef<IntersectionObserver | null>(null);
 
   const fetchConfig = async () => {
@@ -80,11 +149,11 @@ export function ExecutionLogsPanel({ userId }: { userId: string }) {
                const newEmails = updatedLog.details.new_emails?.length || 0;
                const newPhones = updatedLog.details.new_phones?.length || 0;
                if (newEmails > 0 || newPhones > 0) {
-                 toast.success(`Scraper found ${newEmails} new emails and ${newPhones} new phones!`);
+                 toast.success(`Found ${newEmails} new email(s) and ${newPhones} new phone number(s)!`);
                }
             } else if (updatedLog.status === "error") {
-               const label = updatedLog.details?.jobType === "automail" ? "Automail" : "Scraper";
-               toast.error(`${label} execution failed!`);
+               const label = jobTypeLabel(updatedLog.details?.jobType);
+               toast.error(`${label} failed — see Activity for details.`);
             }
 
             setLogs((prev) =>
@@ -102,23 +171,28 @@ export function ExecutionLogsPanel({ userId }: { userId: string }) {
     };
   }, [userId]);
 
-  // Countdown Timer Logic
+  // Countdown to the next LinkedIn search (2026-09-01 fix — this used to key off `logs[0]`, the single
+  // most recent log across every job type, but `intervalMin` is specifically the LinkedIn-search cadence
+  // (auto_fetch_interval_min). If the latest entry happened to be an automail/follow-up/reply-check log
+  // instead, the countdown silently math'd the wrong job's schedule against it — a real source of "this
+  // number doesn't mean anything" confusion, not just a cosmetic one. Now scoped to the latest scraper log.
   useEffect(() => {
-    if (!intervalMin || logs.length === 0) return;
-    
-    const latestLog = logs[0];
-    if (latestLog.status === 'running') {
+    if (!intervalMin) return;
+    const latestScraperLog = logs.find((l) => (l.details?.jobType || "scraper") === "scraper");
+    if (!latestScraperLog) return;
+
+    if (latestScraperLog.status === 'running') {
       setTimeLeft("Running right now...");
       return;
     }
 
     const timer = setInterval(() => {
-      const lastExecTime = new Date(latestLog.created_at).getTime();
+      const lastExecTime = new Date(latestScraperLog.created_at).getTime();
       const intervalMs = intervalMin * 60 * 1000;
       const now = new Date().getTime();
-      
+
       let nextExecTime = lastExecTime + intervalMs;
-      
+
       if (nextExecTime <= now) {
          const cyclesPassed = Math.ceil((now - lastExecTime) / intervalMs);
          nextExecTime = lastExecTime + (cyclesPassed * intervalMs);
@@ -151,28 +225,15 @@ export function ExecutionLogsPanel({ userId }: { userId: string }) {
     [loading, hasMore, page]
   );
 
-  const getStatusClass = (status: string) => {
-    switch (status.toLowerCase()) {
-      case "running":
-        return "text-[var(--accent)]";
-      case "success":
-        return "text-[var(--ok)]";
-      case "error":
-        return "text-[var(--danger)]";
-      default:
-        return "text-[var(--muted)]";
-    }
-  };
-
   return (
     <section className="panel">
       <div className="panel-head" style={{ flexWrap: 'wrap', gap: '1rem' }}>
         <div>
-           <h2>Background Execution Logs</h2>
+           <h2>Activity</h2>
+           <p className="hint compact" style={{ margin: '0.2rem 0 0' }}>What your automations have been doing.</p>
            {intervalMin && logs.length > 0 && (
-             <div style={{ fontSize: '0.8rem', color: 'var(--muted)', marginTop: '0.25rem' }}>
-               <span>Interval: {intervalMin}m</span> &bull; 
-               <span style={{ marginLeft: '0.5rem' }}>Next Run: <strong style={{color: 'var(--ink)'}}>{timeLeft}</strong></span>
+             <div style={{ fontSize: '0.8rem', color: 'var(--muted)', marginTop: '0.35rem' }}>
+               Next LinkedIn search in <strong style={{ color: 'var(--ink)' }}>{timeLeft}</strong>
              </div>
            )}
         </div>
@@ -185,13 +246,13 @@ export function ExecutionLogsPanel({ userId }: { userId: string }) {
           className="btn ghost"
           disabled={loading && page === 0}
         >
-          {loading && page === 0 ? "Refreshing..." : "Refresh Logs"}
+          {loading && page === 0 ? "Refreshing..." : "Refresh"}
         </button>
       </div>
-      <div 
-        className="panel-body" 
-        style={{ 
-          maxHeight: '400px', 
+      <div
+        className="panel-body"
+        style={{
+          maxHeight: '400px',
           overflowY: 'auto',
           scrollbarWidth: 'none', // Firefox
           msOverflowStyle: 'none' // IE/Edge
@@ -205,20 +266,19 @@ export function ExecutionLogsPanel({ userId }: { userId: string }) {
 
         {logs.length === 0 && !loading ? (
           <p className="hint" style={{ textAlign: 'center', margin: '2rem 0' }}>
-            No execution logs found yet.
+            Nothing yet — this fills in once your automations start running.
           </p>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', marginTop: '1rem' }}>
             {logs.map((log, index) => (
-              <LogItem 
-                key={log.id} 
-                log={log} 
-                getStatusClass={getStatusClass} 
-                lastElementRef={index === logs.length - 1 ? lastElementRef : null} 
+              <LogItem
+                key={log.id}
+                log={log}
+                lastElementRef={index === logs.length - 1 ? lastElementRef : null}
               />
             ))}
             {loading && page > 0 && (
-              <p className="hint" style={{ textAlign: 'center', padding: '1rem 0' }}>Loading older logs...</p>
+              <p className="hint" style={{ textAlign: 'center', padding: '1rem 0' }}>Loading older activity...</p>
             )}
           </div>
         )}
@@ -227,42 +287,73 @@ export function ExecutionLogsPanel({ userId }: { userId: string }) {
   );
 }
 
-function LogItem({ log, getStatusClass, lastElementRef }: any) {
+// One parsed line from `details.logs` (backend/src/lib/logger.js writes "[hh:mm:ss] [LEVEL] message").
+// The raw array used to render as a dark terminal console — accurate, but the single biggest reason this
+// tab read as a developer tool, not a candidate-facing activity feed. Parsed into plain rows instead.
+function parseLogLine(line: string): { level: string; text: string } {
+  const m = line.match(/^\[[\d:.]+\]\s*\[(\w+)\]\s*(.*)$/);
+  if (!m) return { level: "INFO", text: line };
+  return { level: m[1], text: m[2] };
+}
+
+function levelColor(level: string) {
+  switch (level.toUpperCase()) {
+    case "ERROR":
+      return "var(--danger)";
+    case "WARN":
+      return "var(--warn)";
+    case "SUCCESS":
+      return "var(--ok)";
+    default:
+      return "var(--muted)";
+  }
+}
+
+function LogItem({ log, lastElementRef }: { log: ExecutionLog; lastElementRef: ((node: HTMLDivElement | null) => void) | null }) {
   const [expanded, setExpanded] = useState(false);
-  const hasDetails = log.details && Object.keys(log.details).length > 0;
+  const [showRaw, setShowRaw] = useState(false);
+  const details = log.details;
+  const steps = (details?.logs || []).map(parseLogLine);
+  const newEmails = details?.new_emails || [];
+  const newPhones = details?.new_phones || [];
+  const hasKnownDetails = steps.length > 0 || newEmails.length > 0 || newPhones.length > 0;
+  const hasUnknownDetails = !hasKnownDetails && !!details && Object.keys(details).some((k) => k !== "jobType");
+  const hasDetails = hasKnownDetails || hasUnknownDetails;
 
   return (
-    <div 
+    <div
       ref={lastElementRef}
-      style={{ 
-        padding: '0.75rem', 
-        backgroundColor: 'var(--bg-elevated)', 
-        border: '1px solid var(--line)', 
-        borderRadius: '6px' 
+      style={{
+        padding: '0.75rem',
+        backgroundColor: 'var(--bg-elevated)',
+        border: '1px solid var(--line)',
+        borderRadius: '10px'
       }}
     >
-      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.25rem' }}>
-        <span className={getStatusClass(log.status)} style={{ fontWeight: 600, fontSize: '0.75rem', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: '6px' }}>
-          {log.status === "running" && (
-            <svg className="animate-spin h-3 w-3" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem', marginBottom: '0.25rem' }}>
+        <span style={{ display: "inline-flex", alignItems: "center", gap: "0.4rem", color: statusColor(log.status), fontWeight: 600, fontSize: '0.8rem' }}>
+          {log.status === "running" ? (
+            <svg className="animate-spin" width="10" height="10" viewBox="0 0 24 24" fill="none">
+              <circle style={{ opacity: 0.25 }} cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+              <path style={{ opacity: 0.75 }} fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
             </svg>
+          ) : (
+            <span style={{ width: 6, height: 6, borderRadius: "50%", background: statusColor(log.status), display: "inline-block" }} />
           )}
-          {log.details?.jobType ? `[${log.details.jobType.toUpperCase()}] ${log.status}` : log.status}
+          {jobTypeLabel(log.details?.jobType)} — {statusLabel(log.status)}
         </span>
         <span style={{ fontSize: '0.75rem', color: 'var(--muted)' }}>
           {new Date(log.created_at).toLocaleString()}
         </span>
       </div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '0.5rem' }}>
-        <p style={{ fontSize: '0.85rem', fontFamily: 'monospace', color: 'var(--ink)', margin: 0, flex: 1 }}>
-          {log.message}
+        <p style={{ fontSize: '0.85rem', color: 'var(--ink)', margin: 0, flex: 1, lineHeight: 1.4 }}>
+          {humanizeMessage(log.message)}
         </p>
         {hasDetails && (
-          <button 
-            type="button" 
-            onClick={() => setExpanded(!expanded)} 
+          <button
+            type="button"
+            onClick={() => setExpanded(!expanded)}
             style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)', padding: '0.1rem' }}
           >
             {expanded ? (
@@ -274,67 +365,64 @@ function LogItem({ log, getStatusClass, lastElementRef }: any) {
         )}
       </div>
       {expanded && hasDetails && (
-        <div style={{ marginTop: '0.5rem', padding: '0.75rem', backgroundColor: 'var(--bg-body)', borderRadius: '6px' }}>
-          {log.details.logs && Array.isArray(log.details.logs) && (
-            <div style={{ marginBottom: '0.75rem' }}>
-              <strong style={{ fontSize: '0.75rem', color: 'var(--ink)', display: 'block', marginBottom: '0.5rem' }}>
-                Terminal Output:
-              </strong>
-              <pre style={{ 
-                backgroundColor: '#1e1e1e', 
-                color: '#d4d4d4', 
-                padding: '0.75rem', 
-                borderRadius: '4px', 
-                fontSize: '0.75rem', 
-                maxHeight: '300px', 
-                overflowY: 'auto',
-                whiteSpace: 'pre-wrap',
-                wordBreak: 'break-word',
-                margin: 0
-              }}>
-                {log.details.logs.map((line: string, i: number) => {
-                  let color = '#d4d4d4';
-                  if (line.includes('[ERROR]')) color = '#f87171'; // red
-                  else if (line.includes('[WARN]')) color = '#fbbf24'; // yellow
-                  else if (line.includes('[SUCCESS]')) color = '#4ade80'; // green
-                  else if (line.includes('[INFO]')) color = '#60a5fa'; // blue
-                  
-                  return <div key={i} style={{ color, marginBottom: '2px', fontFamily: 'monospace' }}>{line}</div>;
-                })}
-              </pre>
-            </div>
-          )}
-
-          {log.details.new_emails && Array.isArray(log.details.new_emails) && log.details.new_emails.length > 0 && (
-            <div style={{ marginBottom: '0.75rem' }}>
-              <strong style={{ fontSize: '0.75rem', color: 'var(--ink)', display: 'block', marginBottom: '0.25rem' }}>
-                📧 New Emails ({log.details.new_emails.length}):
+        <div style={{ marginTop: '0.5rem', padding: '0.75rem', backgroundColor: 'var(--bg)', borderRadius: '8px', display: "flex", flexDirection: "column", gap: "0.6rem" }}>
+          {newEmails.length > 0 && (
+            <div>
+              <strong style={{ fontSize: '0.72rem', color: 'var(--ink)', display: 'block', marginBottom: '0.25rem' }}>
+                New emails found ({newEmails.length})
               </strong>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
-                {log.details.new_emails.map((e: string, i: number) => (
+                {newEmails.map((e, i) => (
                   <span key={i} className="badge ok" style={{ fontSize: '0.7rem' }}>{e}</span>
                 ))}
               </div>
             </div>
           )}
-          
-          {log.details.new_phones && Array.isArray(log.details.new_phones) && log.details.new_phones.length > 0 && (
-            <div style={{ marginBottom: '0.75rem' }}>
-              <strong style={{ fontSize: '0.75rem', color: 'var(--ink)', display: 'block', marginBottom: '0.25rem' }}>
-                📞 New Phones ({log.details.new_phones.length}):
+
+          {newPhones.length > 0 && (
+            <div>
+              <strong style={{ fontSize: '0.72rem', color: 'var(--ink)', display: 'block', marginBottom: '0.25rem' }}>
+                New phone numbers found ({newPhones.length})
               </strong>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
-                {log.details.new_phones.map((p: string, i: number) => (
+                {newPhones.map((p, i) => (
                   <span key={i} className="badge warn" style={{ fontSize: '0.7rem' }}>{p}</span>
                 ))}
               </div>
             </div>
           )}
 
-          {/* Fallback for completely different log structures */}
-          {(!log.details.logs && !log.details.new_emails && !log.details.new_phones) && (
-            <div style={{ fontSize: '0.75rem', fontFamily: 'monospace', color: 'var(--muted)', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
-              {JSON.stringify(log.details, null, 2)}
+          {steps.length > 0 && (
+            <div>
+              <strong style={{ fontSize: '0.72rem', color: 'var(--ink)', display: 'block', marginBottom: '0.35rem' }}>
+                What happened, step by step
+              </strong>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
+                {steps.map((s, i) => (
+                  <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: '0.4rem', fontSize: '0.76rem' }}>
+                    <span style={{ width: 6, height: 6, borderRadius: '50%', background: levelColor(s.level), flexShrink: 0, marginTop: '0.35rem' }} />
+                    <span style={{ color: 'var(--muted)' }}>{s.text}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {hasUnknownDetails && (
+            <div>
+              <button
+                type="button"
+                className="btn ghost"
+                style={{ fontSize: '0.7rem', padding: '0.1rem 0.4rem' }}
+                onClick={() => setShowRaw((v) => !v)}
+              >
+                {showRaw ? "Hide raw data" : "Show raw data"}
+              </button>
+              {showRaw && (
+                <pre style={{ fontSize: '0.7rem', color: 'var(--muted)', whiteSpace: 'pre-wrap', wordBreak: 'break-all', marginTop: '0.4rem' }}>
+                  {JSON.stringify(details, null, 2)}
+                </pre>
+              )}
             </div>
           )}
         </div>
