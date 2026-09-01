@@ -2,6 +2,23 @@
 
 Newest on top. Terse bullets only — done / in-progress / locked decisions / open items. Update every phase.
 
+- **2026-09-02 — DONE: site-wide usability audit follow-through — Job Board tab hidden, shared friendly-
+  error helper, terminology cleanup, Bio/Email Blurb overlap fixed.** Operator: "go ahead not just with the
+  specific one but with all of these that you mentioned." Job Board tab (candidate-facing recruiter
+  marketplace, always empty since Recruiter is still hidden) removed from the sidebar/route the same
+  one-button-revert way Recruiter was — operator: "we do not have any functionality or job at the moment...
+  far far in the future." Not the same thing as the already-shipped, deliberately dev/staging-gated
+  JobSpy/Indeed sourcing pipeline — left that alone. New `lib/friendlyError.ts` replaces raw
+  nodemailer/Supabase/LinkedIn error strings across 5 components with human text (SMTP verify errors now
+  also keep the raw string as a small "Technical details" line, same pattern `EmailDetailPanel` already
+  used). Fixed stale "Jobs & Roles"/"Builder sub-tab" references, harmonized "SMTP account"/"mailbox" to
+  "email account" everywhere, dropped "Gemini"/"CRM" jargon from candidate-facing text, reworded two Roles-
+  tab hints that narrated the AI pipeline instead of the outcome. Renamed Profile's "Candidate Info" field
+  to "Email Blurb" and moved it beside Bio (was a full section apart, both free-text, distinguished only by
+  tooltip). Also deleted a stale `~/.claude/plans/woolly-discovering-candle.md` JobSpy re-plan draft that no
+  longer matched the actual (already-shipped) code. Full breakdown: `docs/architecture.md`. Build clean,
+  lint held at 137.
+
 - **2026-09-01 — DONE: Responses tab rebuilt — clickable table + real manual reply-send via SMTP.**
   Same-day follow-up to the entry below (that was a placeholder read-only card list; this is the real
   shape). Operator: "this whole thing will look similar to the email section... we click the same way

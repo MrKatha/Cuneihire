@@ -220,8 +220,8 @@ export function JamsTab({
   async function sendList(list: Recipient[], options: { force: boolean }) {
     if (!userId) return;
     if (!smtpAccounts.some((a) => a.isVerified && a.isActive)) {
-      setStatus("Add and verify an SMTP account first.");
-      toast.error("Please add and verify at least one SMTP account first.");
+      setStatus("Add and verify an email account first.");
+      toast.error("Please add and verify at least one email account first.");
       return;
     }
     if (!list.length) {

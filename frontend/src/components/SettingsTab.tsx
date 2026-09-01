@@ -138,17 +138,17 @@ export function SettingsTab({
         </div>
         {!canActivate && (
           <p className="hint compact" style={{ color: "var(--danger)", marginTop: "0.5rem", marginBottom: 0 }}>
-            Connect an SMTP account below first.
+            Connect an email account below first.
           </p>
         )}
       </Card>
 
       <Card
-        title="SMTP Accounts"
+        title="Email Accounts"
         action={<button type="button" className="btn primary small" onClick={onOpenSmtp}>{smtpAccounts.length === 0 ? "Add" : "Manage"}</button>}
       >
         {smtpAccounts.length === 0 ? (
-          <p className="hint compact">No mailbox connected yet — add one to start sending.</p>
+          <p className="hint compact">No email account connected yet — add one to start sending.</p>
         ) : (
           <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: "0.4rem" }}>
             {smtpAccounts.map((a) => (

@@ -122,8 +122,7 @@ export function EmailConfigTab({ recipients, templates, roleDefs, activeRole, on
             <p className="hint compact" style={{ marginTop: "0.6rem" }}>
               No template needed for this role — AI writes the whole email from your{" "}
               <strong>candidate info</strong> (My Profile) and the job post. The attachment still comes
-              from this role&apos;s resume, set on the <strong>Resumes</strong> tab&apos;s Builder
-              sub-tab.
+              from this role&apos;s resume, set on the <strong>Resumes</strong> tab.
             </p>
           )}
         </div>

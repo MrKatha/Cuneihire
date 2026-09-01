@@ -6,6 +6,7 @@ import toast from "react-hot-toast";
 import type { AutoFetchConfig, RoleDef } from "@/lib/types";
 import { HelpTooltip } from "./HelpTooltip";
 import { supabase } from "@/lib/supabase";
+import { friendlyLinkedInError } from "@/lib/friendlyError";
 
 type Props = {
   config: AutoFetchConfig;
@@ -106,7 +107,7 @@ export function AutoFetchModal({ config, roleDefs, onSave, onClose, minFetchInte
         });
         const data = await res.json();
         if (!res.ok || !data.success) {
-          toast.error(data.error || "LinkedIn validation failed");
+          toast.error(friendlyLinkedInError(data.error));
           setSaving(false);
           return;
         }
@@ -297,11 +298,11 @@ export function AutoFetchModal({ config, roleDefs, onSave, onClose, minFetchInte
 
           <p className="hint compact" style={{ display: "flex", alignItems: "center", gap: "0.3rem", marginBottom: "0.75rem" }}>
             {hasKeywords
-              ? `${totalKeywords} keyword(s) across ${rolesWithKeywords} role(s) — manage on Jobs & Roles`
-              : "No keywords configured yet — add some on Jobs & Roles before connecting"}
+              ? `${totalKeywords} keyword(s) across ${rolesWithKeywords} role(s) — manage on Roles`
+              : "No keywords configured yet — add some on Roles before connecting"}
             <HelpTooltip
               title="Search Keywords"
-              content={<p>Keywords live on each role, on the <strong>Jobs & Roles</strong> page — the scraper searches every keyword across every role and tags results with that role automatically.</p>}
+              content={<p>Keywords live on each role, on the <strong>Roles</strong> page — the scraper searches every keyword across every role and tags results with that role automatically.</p>}
             />
           </p>
 

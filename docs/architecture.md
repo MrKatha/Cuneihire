@@ -2132,3 +2132,63 @@ Two real bugs surfaced while reconciling the schema against the code (see `docs/
 2. **Fixed 2026-08-17** — `backend/src/workers/batchSend.worker.js` read `automailsend_app_state.delay_sec`
    for the manual-batch send delay while everything else read/wrote `send_delay_sec`; fixed to match during
    the multi-SMTP rewrite (both columns still exist in the schema, `delay_sec` is now simply unused).
+
+## Site-wide usability audit + Job Board tab hidden (2026-09-02)
+Operator ask: "go through the whole site... do an audit and let me know how things are working," plus two
+concrete fixes from the same message (job-post summary instead of raw text in the Emails detail panel,
+wider side panel) — both landed in the prior pass. This entry covers the full audit follow-through, done
+after the operator's "go ahead... with all of these" blessing.
+
+**Job Board tab hidden.** The operator's "we can move on to the next job board" (said right after the JAMS
+Emails audit, "Job Board" being literally the next sidebar tab after JAMS) turned out to mean the opposite
+of "build the next one" — "remove this right now because we do not have any functionality or job at the
+moment... far far in the future." `JobBoardTab.tsx` (the candidate-facing recruiter-portal marketplace,
+2026-08-19) always renders empty for every user today, since the Recruiter side that would feed it real
+postings is itself still hidden (`RecruiterTab`, hidden 2026-08-25). Hidden the same proven way as that
+Recruiter entry: sidebar button and `activeTab === 'board'` render block removed from
+`app/[[...tab]]/page.tsx`, import commented out, component/API route (`/api/jobs/apply`)/schema all left
+untouched — a one-button revert. Not to be confused with the separate, already-shipped JobSpy/Indeed
+sourcing pipeline (`backend/src/lib/jobspyBridge.js` etc., commits `b19b40a`..`c4cd6fb`) — that one is real,
+working backend infra, deliberately hard-gated to dev/staging only by the operator's own prior decision; left
+untouched here since it's a different feature from the "Job Board" sidebar tab.
+
+**Shared friendly-error helper.** Several forms surfaced a raw nodemailer/Supabase/fetch error straight to
+a layman (SMTP verify, manual replies, Quick Send, LinkedIn cookie verify) — each had grown its own
+ad hoc `data.error || "..."` fallback, and `EmailDetailPanel.tsx` already had a proven-but-local
+`formatFriendlyError`. Extracted it to `lib/friendlyError.ts` as `friendlySendError` (SMTP/nodemailer
+keyword-matched translations), `friendlyLinkedInError` (mostly passes the route's already-human strings
+through, only rewrites the raw `Network error: <exception>` case), and `friendlyGenericError(raw, fallback)`
+(generic catch-all for AI/DB errors — only overrides the fallback for recognizable duplicate/network
+patterns). Wired into `EmailDetailPanel.tsx` (now imports instead of defining locally),
+`ResponseDetailPanel.tsx`, `SmtpConfigPanel.tsx` (verify errors now show the friendly text with the raw
+string kept underneath as "Technical details," same pattern `EmailDetailPanel` already used), 
+`AutoFetchModal.tsx`, and `QuickSendModal.tsx` (AI-enhance, send, and add-contact failures).
+
+**Terminology cleanup.** "Jobs & Roles" (stale — the tab is just "Roles") fixed in `AITab.tsx` and
+`AutoFetchModal.tsx`. "Resumes tab's Builder sub-tab" (stale — that sub-tab was flattened into three flat
+tabs, "From your profile"/"Start from scratch"/"Library", back on 2026-08-24) fixed in `JobsRolesTab.tsx`,
+`RoleTemplates.tsx`, `EmailConfigTab.tsx`, and `ProfileTab.tsx`. "SMTP account"/"mailbox" inconsistency
+harmonized to "email account" as the one plain-language term throughout `SettingsTab.tsx`,
+`SmtpConfigPanel.tsx` (including its modal title, card title "Email Accounts", and the reset-confirm
+dialog, which now also spells out what "delay" means instead of naming it unexplained), `JamsTab.tsx`,
+`QuickSendModal.tsx`, `ResponseDetailPanel.tsx`, and `page.tsx`. `AITab.tsx`'s "Powered by Cuneihire's own
+Gemini key" dropped the underlying model name (admin-only `AdminPortal.tsx` still says "Gemini" — that's
+fine, admins are the technical audience). `JobsRolesTab.tsx`'s exclude-keywords and AI-instructions hints
+no longer narrate the AI pipeline itself ("read by the AI when it scores," "sent straight to the AI that
+filters and scores") — reworded to describe the outcome instead, matching the "results only, not process"
+standard already applied to JAMS. `LandingPage.tsx` dropped its one "CRM" mention (never used elsewhere in
+the product) in favor of "contact list."
+
+**Profile page: Bio vs. Email Blurb.** Two overlapping free-text fields (resume summary vs. AI-outreach
+blurb) were previously distinguished only by a hover tooltip and positioned a full page-section apart
+(`ProfileTab.tsx`). Moved the AI-outreach field (renamed from "Candidate Info" to "Email Blurb" — the
+`automail.candidateInfo` field/prop name is untouched, this is a label-only rename) to sit directly under
+Bio, and gave each an always-visible one-line hint pointing at the other, so the distinction doesn't require
+finding and hovering a tooltip.
+
+**Not fixed, deliberately left as-is**: `AdminPortal.tsx`'s "Gemini Calls" heading (admin-only screen,
+technical audience is the point) and `SmtpConfigPanel.tsx`'s "IMAP Host"/"IMAP Port" field labels (only
+shown after a user has already opted into reply monitoring with a tooltip explaining IMAP, and only for the
+"Custom" provider path — already an inherently technical fork).
+
+Build clean, lint held at 137 (unchanged from the prior pass). New file: `lib/friendlyError.ts`.

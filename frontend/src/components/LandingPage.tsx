@@ -170,7 +170,7 @@ export function LandingPage() {
 
           <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-px" style={{ background: 'var(--line)', border: '1px solid var(--line)' }}>
             {[
-              { icon: Search, title: 'LinkedIn Keyword Scraper', body: 'Automatically search LinkedIn for specific keywords and instantly extract targeted profiles and emails into your CRM.' },
+              { icon: Search, title: 'LinkedIn Keyword Scraper', body: 'Automatically search LinkedIn for specific keywords and instantly pull targeted profiles and emails into your contact list.' },
               { icon: UserPlus, title: 'Auto-Extract Recruiters', body: 'Find hiring managers and recruiters from any company page. Let the system pull their contact info while you sleep.' },
               { icon: FileText, title: 'AI Mail Sender', body: 'Our AI analyzes every single LinkedIn profile and writes a highly personalized, custom email for each person automatically.' },
               { icon: Send, title: 'Auto Job Apply', body: "Don't waste time clicking apply. Automatically submit applications and send follow-up emails to the hiring team in the background." },
@@ -274,7 +274,7 @@ export function LandingPage() {
                 </div>
                 <h3 className="text-2xl font-bold mb-3" style={{ fontFamily: 'var(--font-display), Georgia, serif' }}>Connect Your Email (Configuration)</h3>
                 <p className="leading-relaxed" style={{ color: 'color-mix(in srgb, var(--bg) 75%, var(--muted))' }}>
-                  Before Cuneihire can send emails for you, you need to give it permission. Go to the <strong>Settings</strong> tab, open the SMTP Accounts card, and add your email details. Think of this like giving a robot the keys to your mailbox!
+                  Before Cuneihire can send emails for you, you need to give it permission. Go to the <strong>Settings</strong> tab, open the Email Accounts card, and add your email details. Think of this like giving a robot the keys to your mailbox!
                 </p>
               </FadeIn>
             </div>

@@ -14,6 +14,7 @@ import {
   type SmtpAccount,
 } from "@/lib/types";
 import { matchScoreTone, firstUrl } from "@/lib/jobPosts";
+import { friendlySendError } from "@/lib/friendlyError";
 import { Section, HistoryEntry } from "./EmailDetailPanel";
 
 function sentKey(email: string, role: string) {
@@ -71,7 +72,7 @@ export function ResponseDetailPanel({ reply, recipients, roleDefs, sentLog, repl
   async function sendReply() {
     if (!userId) return;
     if (!sendAccount) {
-      toast.error("No verified SMTP account to send from.");
+      toast.error("No verified email account to send from.");
       return;
     }
     if (!replyBody.trim()) {
@@ -103,7 +104,7 @@ export function ResponseDetailPanel({ reply, recipients, roleDefs, sentLog, repl
       });
       const data = await res.json();
       if (!res.ok || !data.success) {
-        toast.error(data.error || "Failed to send reply.");
+        toast.error(friendlySendError(data.error));
         return;
       }
 
@@ -186,7 +187,7 @@ export function ResponseDetailPanel({ reply, recipients, roleDefs, sentLog, repl
             />
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "0.5rem" }}>
               <span className="hint compact" style={{ margin: 0 }}>
-                {sendAccount ? `Sending as ${sendAccount.fromEmail || sendAccount.email}` : "No verified SMTP account connected"}
+                {sendAccount ? `Sending as ${sendAccount.fromEmail || sendAccount.email}` : "No verified email account connected"}
               </span>
               <button type="button" className="btn primary" onClick={sendReply} disabled={sending || !sendAccount}>
                 {sending ? "Sending…" : "Send reply"}

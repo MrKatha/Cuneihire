@@ -31,7 +31,8 @@ import { ProfileTab } from "@/components/ProfileTab";
 import { JobsRolesTab } from "@/components/JobsRolesTab";
 import { AutoFetchModal } from "@/components/AutoFetchModal";
 import { AITab } from "@/components/AITab";
-import { JobBoardTab } from "@/components/JobBoardTab";
+// JobBoardTab import dropped along with its render call — see the "hidden for now" comment near the
+// sidebar nav. Component file untouched, re-add this import when the tab comes back.
 import { RecruiterTab } from "@/components/RecruiterTab";
 import { LandingPage } from "@/components/LandingPage";
 import HexMark, { Wordmark } from "@/components/ui/HexMark";
@@ -783,7 +784,7 @@ export default function Home() {
     if (!userId) return null;
     const saved = await saveSmtpAccount(userId, account);
     if (!saved) {
-      toast.error("Failed to save SMTP account.");
+      toast.error("Failed to save email account.");
       return null;
     }
     setSmtpAccounts((prev) =>
@@ -901,12 +902,10 @@ export default function Home() {
           >
             JAMS
           </button>
-          <button
-            className={`sidebar-tab ${activeTab === 'board' ? 'active' : ''}`}
-            onClick={() => handleTabChange('board')}
-          >
-            Job Board
-          </button>
+          {/* Job Board sidebar entry hidden for now (2026-09-02, operator ask — "we do not have any
+              functionality or job at the moment... far far in the future"): no recruiter has ever posted
+              a real listing, so this tab always renders as an empty state. Same one-button-revert pattern
+              as the Recruiter entry below — tab/route/JobBoardTab.tsx/api/jobs/apply are all left intact. */}
           <button
             className={`sidebar-tab ${activeTab === 'profile' ? 'active' : ''}`}
             onClick={() => handleTabChange('profile')}
@@ -999,16 +998,7 @@ export default function Home() {
             />
           )}
 
-          {activeTab === 'board' && userId && (
-            <JobBoardTab
-              userId={userId}
-              resumeProfiles={resumeProfiles}
-              resumes={resumes}
-              candidateProfile={profile}
-              roleDefs={roleDefs}
-              onSaveResumeProfile={handleSaveResumeProfile}
-            />
-          )}
+          {/* Job Board render disabled alongside its sidebar entry, above — see that comment. */}
 
           {activeTab === 'emails' && (
             <JamsHub

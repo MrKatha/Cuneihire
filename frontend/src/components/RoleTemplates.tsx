@@ -301,8 +301,7 @@ export function RoleTemplates({
 
                 <p className="hint compact" style={{ marginTop: "0.75rem" }}>
                   The resume for &quot;{roleLabel(roleDefs, activeRole)}&quot; is set on the{" "}
-                  <strong>Resumes</strong> tab&apos;s Builder sub-tab — the same one applies to every
-                  template for this role.
+                  <strong>Resumes</strong> tab — the same one applies to every template for this role.
                 </p>
               </div>
             )}

@@ -486,8 +486,8 @@ export function JobsRolesTab({
               onRemove={(v) => onUpdateRoleRules(active.id, { excludeKeywords: active.excludeKeywords.filter((k) => k !== v) })}
             />
             <p className="hint compact" style={{ marginTop: "-0.3rem" }}>
-              Not a search term — read by the AI when it scores a scraped post. A post genuinely about one
-              of these gets scored low even though it matched an Include keyword.
+              Not a search term — a post that&apos;s genuinely about one of these gets filtered out, even if
+              it also matched an Include keyword above.
             </p>
           </div>
 
@@ -500,9 +500,8 @@ export function JobsRolesTab({
               placeholder={'e.g. "Only match low-code/no-code roles" or "exclude anything mentioning unpaid internships"'}
             />
             <p className="hint compact" style={{ margin: "0.3rem 0 0" }}>
-              This prompt is sent straight to the AI that filters and scores scraped posts for this role —
-              it overrides your keyword lists above when they conflict, so a specific instruction here always
-              wins.
+              Extra guidance for filtering and scoring posts for this role — it overrides your keyword lists
+              above when they conflict, so a specific instruction here always wins.
             </p>
           </label>
 
@@ -676,7 +675,8 @@ export function JobsRolesTab({
               onToggleExpand={() => toggleExpanded("skills")}
             />
             <p className="hint compact" style={{ margin: "0.4rem 0 0" }}>
-              This role&apos;s resume is set on the <strong>Resumes</strong> tab&apos;s Builder sub-tab.
+              This role&apos;s resume is set on the <strong>Resumes</strong> tab — pick &quot;From your
+              profile&quot; or &quot;Start from scratch&quot; there.
             </p>
           </div>
         </div>

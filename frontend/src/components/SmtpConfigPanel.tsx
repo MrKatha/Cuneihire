@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import type { SmtpAccount } from "@/lib/types";
 import toast from "react-hot-toast";
 import { HelpTooltip } from "./HelpTooltip";
+import { friendlySendError } from "@/lib/friendlyError";
 
 type Props = {
   accounts: SmtpAccount[];
@@ -59,7 +60,7 @@ export function SmtpConfigPanel({ accounts, maxAccounts, replyMonitoringAllowed,
 
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [message, setMessage] = useState<{ type: "ok" | "err"; text: string } | null>(null);
+  const [message, setMessage] = useState<{ type: "ok" | "err"; text: string; raw?: string } | null>(null);
 
   useEffect(() => {
     setMounted(true);
@@ -141,8 +142,9 @@ export function SmtpConfigPanel({ accounts, maxAccounts, replyMonitoringAllowed,
       });
       const data = await res.json();
       if (!res.ok || !data.success) {
-        setMessage({ type: "err", text: data.error || "Verification failed" });
-        toast.error(data.error || "Verification failed");
+        const friendly = friendlySendError(data.error);
+        setMessage({ type: "err", text: friendly, raw: data.error });
+        toast.error(friendly);
         return;
       }
 
@@ -181,7 +183,7 @@ export function SmtpConfigPanel({ accounts, maxAccounts, replyMonitoringAllowed,
   }
 
   async function handleDelete(a: SmtpAccount) {
-    if (!window.confirm(`Remove "${a.email}"? Sending will stop using this mailbox.`)) return;
+    if (!window.confirm(`Remove "${a.email}"? Sending will stop using this account.`)) return;
     await onDeleteAccount(a.id);
     toast.success("Account removed.");
   }
@@ -189,7 +191,7 @@ export function SmtpConfigPanel({ accounts, maxAccounts, replyMonitoringAllowed,
   function handleReset() {
     if (
       !window.confirm(
-        "Reset all settings? Clears recipients, templates, and delay. SMTP accounts are kept — remove them individually if you want those gone too."
+        "Reset all settings? This clears your recipients, email templates, and the delay between bulk-send emails, back to defaults. Email accounts are kept — remove them individually if you want those gone too."
       )
     ) {
       return;
@@ -211,9 +213,9 @@ export function SmtpConfigPanel({ accounts, maxAccounts, replyMonitoringAllowed,
       >
         <div className="modal-head">
           <div>
-            <h2 id="smtp-modal-title">SMTP accounts</h2>
+            <h2 id="smtp-modal-title">Email accounts</h2>
             <p className="hint compact">
-              Add one or more mailboxes — sends spread across them automatically.
+              Add one or more email accounts — sends spread across them automatically.
             </p>
           </div>
           <button type="button" className="btn ghost" onClick={onClose}>
@@ -225,7 +227,7 @@ export function SmtpConfigPanel({ accounts, maxAccounts, replyMonitoringAllowed,
           {view === "list" && (
             <>
               {accounts.length === 0 ? (
-                <p className="hint">No SMTP accounts yet — add one to start sending.</p>
+                <p className="hint">No email accounts yet — add one to start sending.</p>
               ) : (
                 <ul className="file-list tall" style={{ marginBottom: "1rem" }}>
                   {accounts.map((a) => (
@@ -258,7 +260,7 @@ export function SmtpConfigPanel({ accounts, maxAccounts, replyMonitoringAllowed,
                   </button>
                 ) : (
                   <span className="hint compact">
-                    {maxAccounts === 1 ? "One SMTP account at a time for now." : `Up to ${maxAccounts} SMTP accounts for now.`}
+                    {maxAccounts === 1 ? "One email account at a time for now." : `Up to ${maxAccounts} email accounts for now.`}
                   </span>
                 )}
                 <button type="button" className="btn ghost danger" onClick={handleReset}>
@@ -467,6 +469,11 @@ export function SmtpConfigPanel({ accounts, maxAccounts, replyMonitoringAllowed,
                 {message && (
                   <span className={message.type === "ok" ? "msg ok" : "msg err"}>
                     {message.text}
+                    {message.raw && (
+                      <span style={{ display: "block", fontSize: "0.68rem", opacity: 0.7, wordBreak: "break-all" }}>
+                        Technical details: {message.raw}
+                      </span>
+                    )}
                   </span>
                 )}
               </div>

@@ -10,25 +10,8 @@ import {
   type SentRecord,
 } from "@/lib/types";
 import { matchScoreTone, firstUrl } from "@/lib/jobPosts";
+import { friendlySendError } from "@/lib/friendlyError";
 import { StatusPill } from "./JobPostCard";
-
-function formatFriendlyError(errorMsg?: string) {
-  if (!errorMsg) return "Unknown error occurred.";
-  const msg = errorMsg.toLowerCase();
-  if (msg.includes("auth") || msg.includes("credentials") || msg.includes("password") || msg.includes("535")) {
-    return "Invalid email password or app password.";
-  }
-  if (msg.includes("network") || msg.includes("timeout") || msg.includes("econnrefused")) {
-    return "Could not connect to the email server. Please check your internet connection.";
-  }
-  if (msg.includes("rejected") || msg.includes("spam") || msg.includes("bounce")) {
-    return "The recipient's server rejected the email (possibly marked as spam or invalid address).";
-  }
-  if (msg.includes("limit") || msg.includes("quota")) {
-    return "You have reached your email provider's sending limit.";
-  }
-  return "Something went wrong while sending this email.";
-}
 
 // A short excerpt, not the raw scraped post (2026-09-02, operator ask — "show a summary of the post not
 // the actual post... if the user wants to read the post, they can go to the post link itself," which
@@ -100,7 +83,7 @@ export function HistoryEntry({ record }: { record: SentRecord }) {
       )}
       {showWhy && record.status === "failed" && (
         <div style={{ fontSize: "0.75rem", color: "var(--danger)" }}>
-          {formatFriendlyError(record.error)}
+          {friendlySendError(record.error)}
           {record.error && (
             <div style={{ fontSize: "0.65rem", opacity: 0.7, marginTop: "0.2rem", wordBreak: "break-all" }}>
               Technical info: {record.error}

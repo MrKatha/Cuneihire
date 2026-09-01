@@ -7,6 +7,7 @@ import { supabase } from "@/lib/supabase";
 import { addSentLog } from "@/lib/storage";
 import { applyPlaceholders, hasUnresolvedPlaceholders, TEMPLATE_VARIABLES } from "@/lib/placeholders";
 import { resolveRoleAttachments, describeFiles, computeNextFollowUpAt } from "@/lib/emailResolve";
+import { friendlySendError, friendlyGenericError } from "@/lib/friendlyError";
 import {
   roleLabel,
   type AiConfig,
@@ -165,7 +166,7 @@ export function QuickSendModal({
       setBody(data.body);
       toast.success("Draft ready — review before sending.");
     } catch (e: any) {
-      toast.error(e?.message || "AI enhancement failed.");
+      toast.error(friendlyGenericError(e?.message, "AI enhancement failed. Please try again."));
     } finally {
       setEnhancing(false);
     }
@@ -189,7 +190,7 @@ export function QuickSendModal({
       }
       const account = smtpAccounts.find((a) => a.isVerified && a.isActive);
       if (!account) {
-        toast.error("Add and verify at least one SMTP account first.");
+        toast.error("Add and verify at least one email account first.");
         return;
       }
 
@@ -261,11 +262,11 @@ export function QuickSendModal({
         if (sendRes.ok && sendData.success) {
           toast.success(`Sent to ${email}.`);
         } else {
-          toast.error(`Contact added, but sending failed: ${sendData.error || "unknown error"}`);
+          toast.error(`Contact added, but sending failed: ${friendlySendError(sendData.error)}`);
         }
         onClose();
       } catch (e: any) {
-        toast.error(e?.message || "Failed to send.");
+        toast.error(friendlyGenericError(e?.message, "Failed to send. Please try again."));
       } finally {
         setSaving(false);
       }
@@ -290,7 +291,7 @@ export function QuickSendModal({
       toast.success("Contact added.");
       onClose();
     } catch (e: any) {
-      toast.error(e?.message || "Failed to add contact.");
+      toast.error(friendlyGenericError(e?.message, "Failed to add contact. Please try again."));
     } finally {
       setSaving(false);
     }

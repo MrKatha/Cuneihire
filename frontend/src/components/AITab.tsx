@@ -36,8 +36,7 @@ export function AITab({ ai, aiCredits, onSave }: Props) {
       <div className="panel-head">
         <h2>AI</h2>
         <span className="hint compact">
-          Powered by Cuneihire's own Gemini key — no API key needed from you, just an admin-granted credit
-          balance.
+          Runs on Cuneihire's own AI — no API key needed from you, just an admin-granted credit balance.
         </span>
       </div>
       <div className="panel-body" style={{ display: "flex", flexDirection: "column", gap: "1.25rem", maxWidth: "480px" }}>
@@ -48,7 +47,7 @@ export function AITab({ ai, aiCredits, onSave }: Props) {
               title="AI Personalization"
               content={
                 <>
-                  <p>When on, Automail's AI reads the actual LinkedIn post and writes a unique, relevant email to the author before sending — and scores how well each scraped post matches your role criteria on Jobs &amp; Roles.</p>
+                  <p>When on, Automail's AI reads the actual LinkedIn post and writes a unique, relevant email to the author before sending — and scores how well each scraped post matches your role criteria on Roles.</p>
                   <p>It also powers Quick Send's "Enhance with AI" and the Resume Builder's "Import from a resume."</p>
                   <p>Off just uses your static email templates as-is, and disables the AI-powered buttons elsewhere.</p>
                 </>
@@ -107,7 +106,7 @@ export function AITab({ ai, aiCredits, onSave }: Props) {
                 title="Job-Match Strictness"
                 content={
                   <>
-                    <p>Scraping now checks this too: a post scored below this against a role's criteria on Jobs &amp; Roles is never saved as a contact in the first place — it's judged and skipped, not left "not analyzed."</p>
+                    <p>Scraping now checks this too: a post scored below this against a role's criteria on Roles is never saved as a contact in the first place — it's judged and skipped, not left "not analyzed."</p>
                     <p>Automail's fully-automated background sends still also check it as a second safety net — skipping a recipient entirely (no template, no AI, no send, no credit spent) if an older, already-saved one scores below this.</p>
                     <p>A post that hasn't been scored yet is <strong>never</strong> skipped by either — only ones that were actually scored low.</p>
                     <p>This has no effect on JAMS's manual or bulk sends — those go out exactly as you asked, regardless of score.</p>

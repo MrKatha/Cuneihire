@@ -132,6 +132,10 @@ export function ProfileTab({ profile, onProfileChange, automail, onAutomailChang
           </label>
         </div>
 
+        {/* Bio and Email Blurb kept side by side, not the resume-sections' width away from each other
+            (2026-09-02, site audit — two overlapping free-text fields distinguished only by a hover
+            tooltip, positioned far apart). Each field's own hint below it now says what it's for and
+            points at the other, so the difference is visible without hovering anything. */}
         <label className="field stretch" style={{ marginTop: "0.75rem" }}>
           <span>
             Bio
@@ -146,6 +150,25 @@ export function ProfileTab({ profile, onProfileChange, automail, onAutomailChang
             onChange={(e) => updateField("bio", e.target.value)}
             placeholder="Full-stack developer with 4 years in React, Node.js, and PostgreSQL…"
           />
+          <span className="hint compact">Goes on your resume. For the blurb your outreach emails use instead, see Email Blurb below.</span>
+        </label>
+
+        <label className="field stretch" style={{ marginTop: "0.75rem" }}>
+          <span>
+            Email Blurb
+            <HelpTooltip
+              title="Email Blurb"
+              content={<p>A short blurb feeding AI-personalized outreach emails specifically — separate from your Bio above, which feeds resumes instead.</p>}
+            />
+          </span>
+          <textarea
+            rows={5}
+            maxLength={4000}
+            placeholder="Full-stack developer with 4 years in React, Node.js, and PostgreSQL. Looking for remote roles."
+            value={automail.candidateInfo}
+            onChange={(e) => onAutomailChange({ ...automail, candidateInfo: e.target.value })}
+          />
+          <span className="hint compact">{automail.candidateInfo.length}/4000 — goes in your outreach emails, not your resume. Every AI email re-reads this.</span>
         </label>
 
         <hr style={{ border: "0", borderTop: "1px solid var(--line)", margin: "1rem 0" }} />
@@ -180,27 +203,9 @@ export function ProfileTab({ profile, onProfileChange, automail, onAutomailChang
 
         <hr style={{ border: "0", borderTop: "1px solid var(--line)", margin: "1rem 0" }} />
 
-        <label className="field">
-          <span>
-            Candidate Info
-            <HelpTooltip
-              title="Candidate Info"
-              content={<p>A short blurb feeding AI-personalized outreach emails specifically — separate from your bio above, which feeds resumes instead.</p>}
-            />
-          </span>
-          <textarea
-            rows={5}
-            maxLength={4000}
-            placeholder="Full-stack developer with 4 years in React, Node.js, and PostgreSQL. Looking for remote roles."
-            value={automail.candidateInfo}
-            onChange={(e) => onAutomailChange({ ...automail, candidateInfo: e.target.value })}
-          />
-          <span className="hint compact">{automail.candidateInfo.length}/4000 — a short blurb works best; every AI email re-reads this.</span>
-        </label>
-
         <p className="hint compact" style={{ marginTop: "0.75rem" }}>
-          Your resumes live on the <strong>Resumes</strong> tab — build one per role on{" "}
-          <strong>Builder</strong>, or manage your files and default resume on <strong>Library</strong>.
+          Your resumes live on the <strong>Resumes</strong> tab — build one per role there, or manage your
+          files and default resume on its <strong>Library</strong> tab.
         </p>
       </div>
     </section>
