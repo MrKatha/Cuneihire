@@ -553,6 +553,66 @@ body {
   border-color: color-mix(in srgb, var(--warn) 45%, var(--line));
 }
 
+.badge.danger {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 45%, var(--line));
+}
+
+/* JAMS Emails tab (2026-09-01) — the whole row opens the detail side-panel; this hover is the only
+   affordance telling you that, since most of the row isn't a normal-looking control. */
+.jams-row:hover {
+  background: var(--bg);
+}
+
+/* Right-side slide-over (2026-09-01, JAMS Emails tab detail panel) — distinct from .modal-backdrop/
+   .modal-card (a centered dialog); this one docks to the right edge and covers the full viewport height,
+   for a "drawer" of detail on one row rather than an interruption. */
+.side-panel-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: color-mix(in srgb, #000 45%, transparent);
+  animation: fadeIn 0.2s ease-out forwards;
+}
+
+@keyframes slideInRight {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
+}
+
+.side-panel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  height: 100vh;
+  width: min(460px, 100vw);
+  background: var(--bg-panel);
+  border-left: 1px solid var(--line);
+  box-shadow: -18px 0 50px color-mix(in srgb, #000 20%, transparent);
+  display: flex;
+  flex-direction: column;
+  animation: slideInRight 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.side-panel-head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 1rem 1.1rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.side-panel-body {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 1rem 1.1rem 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.1rem;
+}
+
 .chip {
   display: inline-flex;
   padding: 0.12rem 0.4rem;
