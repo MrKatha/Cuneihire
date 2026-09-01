@@ -68,6 +68,9 @@ export function LandingPage() {
             <span className="font-bold text-xl tracking-tight" style={{ fontFamily: 'var(--font-display), Georgia, serif' }}>Cuneihire</span>
           </div>
           <div className="flex items-center gap-4">
+            <Link href="/resume-builder" className="font-medium text-sm transition-colors hidden sm:inline" style={{ color: 'var(--muted)' }}>
+              Free Resume Builder
+            </Link>
             <Link href="/login" className="font-medium text-sm transition-colors" style={{ color: 'var(--muted)' }}>
               Log in
             </Link>
