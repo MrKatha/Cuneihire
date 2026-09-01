@@ -159,12 +159,6 @@ export function EmailDetailPanel({ recipient: r, roleDefs, history, replies, onC
         </div>
 
         <div className="side-panel-body">
-          {r.phone && (
-            <Section title="Phone">
-              <div style={{ fontSize: "0.85rem" }}>{r.phone}</div>
-            </Section>
-          )}
-
           {(r.title || r.job_post_id || postUrl || r.context_text) && (
             <Section title="The job">
               {r.title && <div style={{ fontSize: "0.9rem", fontWeight: 600 }}>{r.title}</div>}
@@ -173,9 +167,6 @@ export function EmailDetailPanel({ recipient: r, roleDefs, history, replies, onC
                 <div style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}>
                   <span style={{ color: tone.color, fontWeight: 700, fontSize: "0.8rem" }}>{tone.label}</span>
                 </div>
-              )}
-              {r.match_reasoning && (
-                <div style={{ fontSize: "0.78rem", color: "var(--muted)", lineHeight: 1.5 }}>{r.match_reasoning}</div>
               )}
               {r.context_text && (
                 <div style={{ fontSize: "0.75rem", color: "var(--muted)", lineHeight: 1.5, maxHeight: "6rem", overflowY: "auto", border: "1px solid var(--line)", borderRadius: "8px", padding: "0.5rem", whiteSpace: "pre-wrap" }}>
