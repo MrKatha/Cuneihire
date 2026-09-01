@@ -15,16 +15,20 @@ Newest on top. Terse bullets only — done / in-progress / locked decisions / op
   only). Also flagged, not yet resolved: every signup still defaults `plan_tier='free'` with no forcing
   function to subscribe — needs a real decision (time-boxed trial vs. "mostly locked until you subscribe")
   once that wiring happens.
-- **2026-08-31 — SCOPED, NOT STARTED: public resume builder as a lead-gen/ad funnel** (ClickUp `86eytbf5e`,
-  Phase 4). Operator decision: fully public/unauthenticated builder (reuses the existing authed
-  `ResumeBuilder.tsx`/`automailsend_resume_profiles` logic — Build from profile / Start from scratch /
-  Upload), anonymous drafts live in browser storage, email-gated only at download (creates a lead-only
-  record, confirmed via AskUserQuestion — not a real account), logged-in visitors save into their real
-  library as today. New: a sharper design pass + a live heuristic ATS-friendliness score. Ads: build the
-  page now, but don't apply to any network until the `cuneihire.com` domain exists (~5 days out, confirmed
-  via AskUserQuestion — AdSense-type networks expect a real TLD). Real scope (new public route + SEO, a
-  new leads table + public rate-limited insert endpoint, dual anon/authed builder mode, the ATS algorithm
-  itself) — not started; kickoff pending operator go-ahead.
+- **2026-08-31 — DONE (Phase A), shipped and live: public resume builder** (ClickUp `86eytbf5e`, Phase 4).
+  Live at `hire.cuneihive.com/resume-builder`, smoke-tested end to end in production (page 200, lead-capture
+  POST confirmed inserted then cleaned up). Built as a separate `PublicResumeBuilder.tsx` sibling (not a
+  rework of the authed `ResumeBuilder.tsx` — too coupled to roles/Supabase-save state), reusing only the
+  pure pieces (templates, the PDF-gen hook, `MarkdownLiteField`, `ResumeData` type). Ships: Build-from-
+  profile/Start-from-scratch entry points (Upload disabled — "coming soon," see below), localStorage-backed
+  anonymous drafts, email-gated download → new `automailsend_resume_leads` table (lead-only, RLS default-
+  deny, service-role-only writes via `/api/public/resume-leads`), a real zero-cost heuristic ATS-score
+  panel (`lib/atsScore.ts`) with optional job-description keyword match, a reserved (unpopulated) ad-slot
+  div, and a landing-page nav link. Build/lint clean, 144 baseline unchanged. **Deliberately not built**:
+  the anonymous "Upload your own" path (would need its own abuse/rate-limit budget separate from the
+  platform's one shared, already-rate-limited Gemini key — flagged, not silently shipped half-working),
+  ads themselves (waiting on the `cuneihire.com` domain, per operator decision). See docs/architecture.md's
+  "Public resume builder" section for the full design.
 - **2026-08-31 — DONE: Terms of Service, Privacy Policy, Refund Policy — the blocking requirement for
   Lemon Squeezy store approval** (`86eyrp54p`, closed). Live: `/terms`, `/privacy`, `/refund-policy`, all
   on a shared `LegalPageShell` component (cross-links, consistent typography, no client JS). Content is

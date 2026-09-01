@@ -595,6 +595,49 @@ same `callAiJson` dispatch already there) to structure it into `ResumeData` — 
 the user to review before it's saved, never auto-persisted. Gated on `automail.aiEnabled` and the caller's
 AI credit balance (2026-08-18 — see below), same as every other AI feature in this app.
 
+## Public resume builder (2026-08-31, Phase A) — lead-gen/ad funnel, ClickUp `86eytbf5e`
+Operator decision: the free/lead-gen role for the whole product moves off the main app entirely (no more
+$0 app tier — see `docs/pricing-tiers.md`) onto a standalone public tool at `/resume-builder`, fully
+unauthenticated, discoverable via organic search ("resume builder") rather than linked from inside the
+product. `frontend/src/app/resume-builder/page.tsx` carries real SEO metadata for exactly that reason.
+
+**Deliberately a separate sibling component, not a rework of `ResumeBuilder.tsx`** — that 1300+-line
+component is woven into roles/candidate-profile/Supabase-save state that doesn't exist for an anonymous
+visitor (same "duplicate rather than risk the live component" call as `jobspy.worker.js` vs.
+`scraper.worker.js` earlier this session). `PublicResumeBuilder.tsx` reuses only the genuinely pure pieces:
+`ModernTemplate`/`ClassicTemplate`, the `useResumeProfilePdf` PDF-generation hook (`generateDownload` needs
+only a `ResumeProfile` shape, no `userId`/upload — already handles pagination/fonts correctly, so this gets
+a pixel-correct PDF for free instead of reinventing `window.print()`), `MarkdownLiteField`, and the
+`ResumeData` type itself — so a draft is trivially the same shape a real saved profile would be.
+
+- **Entry points**: Build from profile (checks for a session; if none, sends to `/login?next=/resume-builder`
+  — there's no profile to build from anonymously; if logged in, pulls the real `CandidateProfile` via the
+  existing `loadCandidateProfile()`), Start from scratch (the real anonymous flow), Upload your own
+  (**disabled, "coming soon"** — the existing `/api/resume-import` AI-parse path spends an `ai_credit` tied
+  to an authed user; giving anonymous public visitors an unlimited, unauthenticated path to the platform's
+  one shared, already-rate-limited Gemini key is a real abuse vector, not built this pass).
+- **Anonymous drafts** live in `localStorage` only (`cuneihire_public_resume_draft`), autosaved on the same
+  ~800ms debounce convention used elsewhere. Logged-in visitors get a "Save to my library" button instead,
+  inserting straight into their real `automailsend_resume_profiles`.
+- **Download — free and ungated for a logged-in visitor.** An anonymous visitor hits an email-gate modal
+  first (a honeypot field + a simple per-email/per-IP rate limit, 3 per 10min) that inserts into a new
+  `automailsend_resume_leads` table (email + a snapshot of the resume data + template + IP) before the same
+  `generateDownload()` fires. This is a **lead-only record, not a real account** (operator decision) — the
+  table has RLS enabled with zero policies (default-deny for anon/authenticated), so the only writer is
+  `frontend/src/app/api/public/resume-leads/route.ts` using the service-role client (`lib/adminAuth.ts`'s
+  already-exported `supabaseAdmin`) server-side, which also does the actual validation/rate-limiting.
+- **ATS-friendliness score** (`lib/atsScore.ts`) — deliberately a pure, zero-cost heuristic, not
+  AI-powered: checks contact-info presence, section completeness (summary/experience/education/skills),
+  bullet usage, action-verb usage, and content length, plus an optional keyword-overlap percentage against
+  a pasted job description (simple tokenized set intersection). Has to be free and abuse-proof since it
+  runs on an unauthenticated public page — no network call, no `ai_credits` touched.
+- **Ads**: a reserved placeholder `<div>` only, no script, no network call. Operator decision: wait for the
+  `cuneihire.com` domain (~5 days out as of this writing) before applying to any ad network — AdSense-type
+  networks expect a real top-level domain, not `hire.cuneihive.com` or a bare Vercel URL.
+- **Not yet built** (flagged, not silently cut): the "Upload your own" anonymous path above, and a
+  non-AI fallback for it (e.g. plain `pdf-parse` text extraction with no AI structuring) hasn't been
+  designed either.
+
 ## Platform-managed AI — no more BYOK (2026-08-18)
 Every AI feature (background personalization, JAMS job-match scoring, Quick Send's "Enhance with AI",
 Resume Builder's PDF import) used to require each user to bring their own provider + API key
