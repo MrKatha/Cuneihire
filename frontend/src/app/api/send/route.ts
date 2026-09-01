@@ -22,7 +22,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { fromName, email, fromEmail, appPassword, host, port, toEmail, subject, content, attachments = [] } = body;
+    const { fromName, email, fromEmail, appPassword, host, port, toEmail, subject, content, attachments = [], inReplyTo, references } = body;
 
     if (!email || !appPassword || !host || !port || !toEmail || !subject) {
       return NextResponse.json(
@@ -66,6 +66,11 @@ export async function POST(request: NextRequest) {
         path: a.path, // This is the public URL
         contentType: a.contentType,
       })),
+      // Optional threading headers (2026-09-01, Responses tab's manual-reply feature) — set when this
+      // send is actually a reply to a specific inbound message, so it lands in the recipient's inbox as
+      // part of the existing thread instead of a new, seemingly unrelated email. Omitted (undefined) for
+      // every other caller of this route, unchanged behavior.
+      ...(inReplyTo ? { inReplyTo, references: references || inReplyTo } : {}),
     });
 
     await spendAppCredit(userId); // only after sendMail() actually succeeded

@@ -2,6 +2,22 @@
 
 Newest on top. Terse bullets only — done / in-progress / locked decisions / open items. Update every phase.
 
+- **2026-09-01 — DONE: Responses tab rebuilt — clickable table + real manual reply-send via SMTP.**
+  Same-day follow-up to the entry below (that was a placeholder read-only card list; this is the real
+  shape). Operator: "this whole thing will look similar to the email section... we click the same way
+  clickable... we can also do the manual response to the emails that we get... our SMTP will indicate what
+  I want from here." AI-drafted replies ("AIS system") explicitly deferred by the operator — manual-only
+  this pass, not a gap. Shipped: `ResponsesTab.tsx` now a `JamsTab`-style clickable table (rows = replies,
+  15/page); new `ResponseDetailPanel.tsx` right-side slide-over (reuses `EmailDetailPanel.tsx`'s now-
+  exported `Section`/`HistoryEntry`) showing the reply first, then a real compose-and-send box, then job
+  context + full send history. Reply send: real delivery through `/api/send` (extended with optional
+  `inReplyTo`/`references` for proper inbox threading, backward compatible), from the SMTP account that
+  actually received the reply (`ReplyRecord.smtpAccountId`, new field), credit-metered same as every other
+  send, logged via `addSentLog` on success (shows in history, and correctly clears any pending automated
+  follow-up for that contact — free side effect of reusing the existing function). Known limitation, not
+  fixed: reply bodies are capped at 1000 chars server-side (pre-existing, `replyPoll.worker.js`), so an
+  unusually long reply would show truncated with no indicator. Full breakdown: `docs/architecture.md`.
+  Build clean, lint held at 138. Pushed to master+staging.
 - **2026-09-01 — DONE: JAMS "results only, not process" pass — Monitoring became Responses, phone/AI-
   reasoning stripped from Emails.** Operator, same day as the two entries below, going further than the
   Monitoring humanizing pass: "the user does not need to know that we are checking 110 messages... he will

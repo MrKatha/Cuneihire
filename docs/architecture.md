@@ -691,6 +691,49 @@ discussed — not an open-ended app-wide audit.
   deleting `ExecutionLogsPanel.tsx` removed its own pre-existing lint entries along with it, and dropping
   the phone filter removed an now-unused-state warning path.
 
+### Responses tab rebuilt as a clickable table + manual reply-send (2026-09-01)
+Same-day follow-up to the section above — the first Responses pass (plain reply cards, read-only) was a
+placeholder; this is the real shape. Operator: "this whole thing will look similar to the email section...
+we will see the same emails that we sent but it will focus more on the responses that we get... we click
+the same way clickable like our normal emails are but here we can also do the manual response to the
+emails that we get... our SMTP will indicate what I want from here." AI-drafted replies ("AIS system")
+explicitly deferred by the operator — this pass is manual-compose-and-send only, not a missing feature.
+
+- **`ResponsesTab.tsx` rewritten**: was a flat list of reply cards, now a `JamsTab.tsx`-style clickable
+  table (From / Role & title / Message preview / Received), 15/page pagination, same `.jams-row` hover
+  affordance. Rows are replies, not contacts. Clicking one opens `ResponseDetailPanel.tsx` (new).
+- **`ResponseDetailPanel.tsx` (new)** — a right-side slide-over (reuses the `.side-panel*` CSS from
+  `EmailDetailPanel.tsx`; both now import shared `Section`/`HistoryEntry` presentational pieces from that
+  file rather than duplicating them). Content, reply-first: the received message (subject/body/date), a
+  **compose box** (subject pre-filled `Re: {original subject}`, body textarea, Send button — the new
+  capability), the job context (title/match/post link), any other replies from the same contact, and that
+  contact's full send history (same `HistoryEntry` rendering `JamsTab`/`EmailDetailPanel` already use).
+- **Manual reply send, real SMTP delivery, not a mock**:
+  - Sends through the SMTP account that actually *received* the reply
+    (`ReplyRecord.smtpAccountId` → matched against `smtpAccounts`, falling back to the first
+    verified/active account) — "our SMTP will indicate what I want from here," not a dropdown to choose
+    from (moot today anyway, since the tier system currently caps every account at one SMTP mailbox).
+  - Goes through the same `/api/send` route every other send in the app uses (QuickSendModal's exact
+    pattern: Bearer session token, `email`/`appPassword`/`host`/`port` from the `SmtpAccount`, app-credit
+    metered same as any other send) — not a separate, parallel send path.
+  - **`/api/send/route.ts` extended** with two new optional fields, `inReplyTo`/`references`, passed
+    straight to nodemailer's `sendMail()` when present. Backward compatible — every existing caller that
+    doesn't send them behaves exactly as before. This is what makes a manual reply actually thread into the
+    recipient's inbox as part of the existing conversation instead of landing as an unrelated new email.
+  - **On success, logged via `addSentLog`** (same function/table every other send uses,
+    `templateLabel: "Manual reply"` to distinguish it in history) — so it shows up in this contact's send
+    history here and in the Emails tab, an honest record of what actually went out. `addSentLog`'s existing
+    "sent" behavior also clears the contact's `next_follow_up_at` — correct here too: a live reply exchange
+    makes a further automated follow-up redundant, not something that needed new code to handle.
+  - `ReplyRecord` extended with `messageId`/`smtpAccountId` (read from `automailsend_replies.message_id`/
+    `.smtp_account_id`, already columns on that table — just not previously surfaced to the frontend type).
+- **Real limitation, not addressed this pass**: `automailsend_replies.body_snippet` is capped at 1000 chars
+  server-side (`replyPoll.worker.js`'s `SNIPPET_MAX_CHARS`) — the panel shows this in full as "their
+  reply," which is accurate for the overwhelming majority of real replies but would silently truncate an
+  unusually long one with no indicator that it's cut off. Not fixed here (would mean storing/fetching full
+  bodies, a bigger change); flagged so it isn't mistaken for a display bug later.
+- Build clean, lint held at 138 (this new code didn't touch the pre-existing baseline entries).
+
 ## Resume Builder (2026-08-18)
 A resumai.com-style structured builder — genuinely separate from the `automailsend_resumes` file library
 above (structured, editable *data* vs. a finished *file*), living inside the same **Resumes** tab as a

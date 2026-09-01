@@ -488,6 +488,12 @@ export type ReplyRecord = {
   bodySnippet?: string;
   receivedAt?: string;
   matchMethod?: "header" | "sender_subject";
+  // Added 2026-09-01 for the Responses tab's manual-reply feature (ResponseDetailPanel.tsx) — messageId
+  // becomes the In-Reply-To header on a manual reply so it threads properly in the recipient's inbox
+  // instead of landing as an unrelated new email; smtpAccountId picks which of the user's SMTP accounts
+  // to send the reply from (the one that actually received it, not just "whichever is first").
+  messageId?: string;
+  smtpAccountId?: string;
 };
 
 // Keywords moved to per-role (RoleDef.keywords) — this is now pure scraper mechanics.

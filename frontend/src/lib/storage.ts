@@ -343,6 +343,8 @@ export async function loadState(userId: string): Promise<PersistedState> {
       bodySnippet: r.body_snippet || undefined,
       receivedAt: r.received_at || r.created_at,
       matchMethod: (r.match_method as ReplyRecord["matchMethod"]) || undefined,
+      messageId: r.message_id || undefined,
+      smtpAccountId: r.smtp_account_id || undefined,
     }));
   }
 
