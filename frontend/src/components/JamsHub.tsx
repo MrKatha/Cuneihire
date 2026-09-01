@@ -42,6 +42,14 @@ type Props = {
   delaySec: number;
   onDelayChange: (delaySec: number) => void;
   onUpdateStatus?: (id: string, field: "status" | "phone_status", newStatus: string) => Promise<void>;
+  onAiSummaryGenerated?: (recipientId: string, summary: string) => void;
+  // Deep-link from the new-reply toast (2026-09-02, page.tsx) — a non-null id means "a reply notification
+  // was just clicked, force the Responses sub-tab open to that exact reply," overriding whatever sub-tab
+  // was locally selected. Read at render time (effectiveSubTab below), never synced into local state via
+  // an effect — this repo's React Compiler lint forbids setState-in-effect, and there's no need for it here
+  // anyway: a plain "external override wins over local state until explicitly cleared" derivation is enough.
+  pendingReplyFocus?: string | null;
+  onClearPendingReplyFocus?: () => void;
 };
 
 // JAMS as the app's main landing page (2026-08-25, operator ask — "just keep like jams as our main
@@ -71,8 +79,14 @@ export function JamsHub({
   delaySec,
   onDelayChange,
   onUpdateStatus,
+  onAiSummaryGenerated,
+  pendingReplyFocus,
+  onClearPendingReplyFocus,
 }: Props) {
   const [subTab, setSubTab] = useState<JamsSubTab>("overview");
+  // A pending reply focus always wins over whatever sub-tab was locally selected, until it's cleared (by
+  // the Responses panel closing, or by picking any sub-tab manually below) — see the Props comment above.
+  const effectiveSubTab: JamsSubTab = pendingReplyFocus ? "responses" : subTab;
 
   return (
     <section className="panel">
@@ -84,18 +98,30 @@ export function JamsHub({
       </div>
       <div className="panel-body">
         <div style={{ display: "flex", gap: "0.4rem", margin: "0 0 1rem" }}>
-          <button type="button" className={`btn ${subTab === "overview" ? "primary" : "ghost"}`} onClick={() => setSubTab("overview")}>
+          <button
+            type="button"
+            className={`btn ${effectiveSubTab === "overview" ? "primary" : "ghost"}`}
+            onClick={() => { setSubTab("overview"); onClearPendingReplyFocus?.(); }}
+          >
             Overview
           </button>
-          <button type="button" className={`btn ${subTab === "emails" ? "primary" : "ghost"}`} onClick={() => setSubTab("emails")}>
+          <button
+            type="button"
+            className={`btn ${effectiveSubTab === "emails" ? "primary" : "ghost"}`}
+            onClick={() => { setSubTab("emails"); onClearPendingReplyFocus?.(); }}
+          >
             Emails
           </button>
-          <button type="button" className={`btn ${subTab === "responses" ? "primary" : "ghost"}`} onClick={() => setSubTab("responses")}>
+          <button
+            type="button"
+            className={`btn ${effectiveSubTab === "responses" ? "primary" : "ghost"}`}
+            onClick={() => { setSubTab("responses"); onClearPendingReplyFocus?.(); }}
+          >
             Responses
           </button>
         </div>
 
-        {subTab === "overview" && (
+        {effectiveSubTab === "overview" && (
           <JamsOverviewTab
             profile={profile}
             automail={automail}
@@ -111,7 +137,7 @@ export function JamsHub({
           />
         )}
 
-        {subTab === "emails" && (
+        {effectiveSubTab === "emails" && (
           <JamsTab
             userId={userId}
             recipients={recipients}
@@ -129,10 +155,11 @@ export function JamsHub({
             delaySec={delaySec}
             onDelayChange={onDelayChange}
             onUpdateStatus={onUpdateStatus}
+            onAiSummaryGenerated={onAiSummaryGenerated}
           />
         )}
 
-        {subTab === "responses" && (
+        {effectiveSubTab === "responses" && (
           userId ? (
             <ResponsesTab
               replies={replies}
@@ -141,6 +168,8 @@ export function JamsHub({
               sentLog={sentLog}
               smtpAccounts={smtpAccounts}
               userId={userId}
+              pendingReplyFocus={pendingReplyFocus}
+              onClearPendingReplyFocus={onClearPendingReplyFocus}
             />
           ) : (
             <p className="hint">Sign in to see your responses.</p>

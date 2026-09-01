@@ -97,6 +97,11 @@ export default function Home() {
   const router = useRouter();
 
   const [activeTab, setActiveTab] = useState<TabName>("emails");
+  // Reply-notification deep link (2026-09-02) — set only from the new-reply toast's own onClick below,
+  // never from an effect. Read by JamsHub/ResponsesTab at render time as an override that wins over
+  // whatever sub-tab/row was locally selected, until it's cleared (see handleTabChange below, and every
+  // manual-navigation handler those two components add on top of their own local state).
+  const [pendingReplyFocus, setPendingReplyFocus] = useState<string | null>(null);
   // Resumes tab's own Builder/Library sub-tab now lives inside ResumeBuilder itself, alongside the
   // From-your-profile/Start-from-scratch mode (2026-08-24, UI pass) — see that component's resumeSubTab
   // state comment.
@@ -144,6 +149,13 @@ export default function Home() {
 
   const handleTabChange = (tab: TabName) => {
     setActiveTab(tab);
+    // Clears any pending reply focus on every tab change, from every call site (sidebar buttons, the
+    // reply toast itself, etc.) — the one place this needs to live. The toast's own click handler calls
+    // this and then sets a fresh pendingReplyFocus right after, in the same synchronous handler; React
+    // batches both updates from one event handler, so the later call (setting it) is what's actually in
+    // effect once the batch flushes — this line doesn't undo that, it only clears STALE focus left over
+    // from a previous reply once the user has navigated away some other way.
+    setPendingReplyFocus(null);
     if (typeof window !== "undefined") {
       window.history.pushState(null, '', `/${tab}`);
     }
@@ -546,7 +558,23 @@ export default function Home() {
               : r
             ));
           }
-          toast.success(`New reply from ${newReply.from_email}!`);
+          // Clickable (2026-09-02, operator ask — "clicking on that reply [notification] takes me to the
+          // response tab and to that specific mail where I received a reply") — jumps straight to JAMS'
+          // Responses sub-tab and opens that exact reply's thread. handleTabChange('emails') clears any
+          // stale pendingReplyFocus first; setPendingReplyFocus right after (same synchronous handler,
+          // batched by React) is what actually lands once the batch flushes — see handleTabChange's comment.
+          toast.success((t) => (
+            <span
+              style={{ cursor: "pointer" }}
+              onClick={() => {
+                toast.dismiss(t.id);
+                handleTabChange('emails');
+                setPendingReplyFocus(newReply.id);
+              }}
+            >
+              New reply from {newReply.from_email}! <span style={{ textDecoration: "underline" }}>View →</span>
+            </span>
+          ), { id: `reply-${newReply.id}` });
         }
       )
       .subscribe();
@@ -776,6 +804,13 @@ export default function Home() {
     const updated = recipients.map(r => r.id === id ? { ...r, [field]: newStatus } : r);
     setRecipients(updated);
     await supabase.from("automailsend_recipients").update({ [field]: newStatus }).eq("id", id);
+  }
+
+  // Local-state-only (2026-09-02) — /api/summarize-post already persisted ai_summary server-side; this
+  // just keeps this session's own recipients list in sync so reopening the same recipient's panel shows
+  // the summary instantly instead of asking the network again.
+  function handleAiSummaryGenerated(recipientId: string, summary: string) {
+    setRecipients((prev) => prev.map((r) => r.id === recipientId ? { ...r, ai_summary: summary } : r));
   }
 
   async function handleSaveSmtpAccount(
@@ -1023,6 +1058,9 @@ export default function Home() {
               delaySec={delaySec}
               onDelayChange={setDelaySec}
               onUpdateStatus={handleUpdateRecipientStatus}
+              onAiSummaryGenerated={handleAiSummaryGenerated}
+              pendingReplyFocus={pendingReplyFocus}
+              onClearPendingReplyFocus={() => setPendingReplyFocus(null)}
             />
           )}
 

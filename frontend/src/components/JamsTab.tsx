@@ -38,6 +38,7 @@ type Props = {
   delaySec: number;
   onDelayChange: (delaySec: number) => void;
   onUpdateStatus?: (id: string, field: "status" | "phone_status", newStatus: string) => Promise<void>;
+  onAiSummaryGenerated?: (recipientId: string, summary: string) => void;
 };
 
 function sentKey(email: string, role: Role) {
@@ -70,6 +71,7 @@ export function JamsTab({
   onSendingChange,
   delaySec,
   onDelayChange,
+  onAiSummaryGenerated,
 }: Props) {
   const [filterStatus, setFilterStatus] = useState("all");
   const [filterSource, setFilterSource] = useState("all");
@@ -550,6 +552,7 @@ export function JamsTab({
           roleDefs={roleDefs}
           history={historyFor(detailRecipient)}
           replies={repliesFor(detailRecipient)}
+          onAiSummaryGenerated={onAiSummaryGenerated}
           onClose={() => setDetailRecipientId(null)}
         />
       )}

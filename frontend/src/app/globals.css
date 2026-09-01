@@ -616,6 +616,21 @@ body {
   gap: 1.1rem;
 }
 
+/* A quiet placeholder while the AI job-post summary generates (2026-09-02) — no loading text, just a
+   pulsing line, per the "results only, not process" standard: the user shouldn't see that a background
+   call is happening, only the result once it lands. */
+@keyframes pulse {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 0.85; }
+}
+
+.skeleton-line {
+  height: 0.85em;
+  border-radius: 4px;
+  background: var(--line);
+  animation: pulse 1.4s ease-in-out infinite;
+}
+
 .chip {
   display: inline-flex;
   padding: 0.12rem 0.4rem;

@@ -15,7 +15,7 @@ import {
 } from "@/lib/types";
 import { matchScoreTone, firstUrl } from "@/lib/jobPosts";
 import { friendlySendError } from "@/lib/friendlyError";
-import { Section, HistoryEntry } from "./EmailDetailPanel";
+import { Section } from "./EmailDetailPanel";
 
 function sentKey(email: string, role: string) {
   return `${email.toLowerCase()}::${role}`;
@@ -24,6 +24,48 @@ function sentKey(email: string, role: string) {
 function replySubjectFor(original?: string) {
   if (!original) return "";
   return /^\s*re\s*:/i.test(original) ? original : `Re: ${original}`;
+}
+
+// A merged, chronological (oldest-first, like a real email thread) view of every message with this
+// contact — our sent emails and their replies interleaved, not two separate lists (2026-09-02, operator
+// ask: "I want a thread on each response... a back-and-forth conversation... completely monitored, so
+// there's very little reason for the customer to leave this platform"). Local to this file, not exported —
+// this layout is specific to this panel; EmailDetailPanel.tsx's HistoryEntry stays untouched.
+type ThreadItem =
+  | { type: "sent"; at: string; record: SentRecord }
+  | { type: "received"; at: string; record: ReplyRecord };
+
+function ThreadMessage({ item, contactLabel, showSubject }: { item: ThreadItem; contactLabel: string; showSubject: boolean }) {
+  const isSent = item.type === "sent";
+  const subject = item.record.subject;
+  const body = isSent ? (item.record as SentRecord).body : (item.record as ReplyRecord).bodySnippet;
+  const failed = isSent && (item.record as SentRecord).status === "failed";
+  return (
+    <div
+      style={{
+        borderLeft: `3px solid ${isSent ? "var(--accent)" : "var(--line)"}`,
+        borderRadius: "4px",
+        padding: "0.4rem 0.65rem",
+        background: isSent ? "var(--bg-elevated)" : "transparent",
+      }}
+    >
+      <div style={{ display: "flex", justifyContent: "space-between", gap: "0.5rem", fontSize: "0.72rem", color: "var(--muted)" }}>
+        <span style={{ fontWeight: 600 }}>{isSent ? "You" : contactLabel}</span>
+        {item.at && <span>{new Date(item.at).toLocaleString()}</span>}
+      </div>
+      {showSubject && subject && (
+        <div style={{ fontWeight: 500, fontSize: "0.82rem", marginTop: "0.2rem" }}>{subject}</div>
+      )}
+      <div style={{ fontSize: "0.82rem", lineHeight: 1.5, whiteSpace: "pre-wrap", marginTop: "0.2rem" }}>
+        {body || "(No message body)"}
+      </div>
+      {failed && (
+        <div style={{ fontSize: "0.75rem", color: "var(--danger)", marginTop: "0.3rem" }}>
+          Failed to send — {friendlySendError((item.record as SentRecord).error)}
+        </div>
+      )}
+    </div>
+  );
 }
 
 type Props = {
@@ -54,13 +96,16 @@ export function ResponseDetailPanel({ reply, recipients, roleDefs, sentLog, repl
   const postUrl = recipient ? firstUrl(recipient.source_url) : undefined;
 
   const history = recipient
-    ? [...sentLog]
-        .filter((s) => sentKey(s.email, s.role) === sentKey(recipient.email, recipient.role))
-        .sort((a, b) => new Date(b.sentAt).getTime() - new Date(a.sentAt).getTime())
+    ? sentLog.filter((s) => sentKey(s.email, s.role) === sentKey(recipient.email, recipient.role))
     : [];
-  const otherReplies = recipient
-    ? replies.filter((r) => r.id !== reply.id && r.recipientId === recipient.id)
-    : [];
+  // Every reply from this contact, including the one that was clicked to open this panel — merged with
+  // `history` below into one chronological thread, not shown as two separate lists.
+  const allReplies = recipient ? replies.filter((r) => r.recipientId === recipient.id) : [reply];
+  const contactLabel = recipient?.email || reply.fromEmail;
+  const thread: ThreadItem[] = [
+    ...history.map((s) => ({ type: "sent" as const, at: s.sentAt, record: s })),
+    ...allReplies.map((r) => ({ type: "received" as const, at: r.receivedAt || "", record: r })),
+  ].sort((a, b) => new Date(a.at).getTime() - new Date(b.at).getTime());
 
   // Which SMTP account to send the reply from: the one that actually received it (correct once the
   // account cap changes from "one per user"), falling back to whichever verified account is available.
@@ -160,14 +205,33 @@ export function ResponseDetailPanel({ reply, recipients, roleDefs, sentLog, repl
         </div>
 
         <div className="side-panel-body">
-          <Section title="Their reply">
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: "0.5rem", flexWrap: "wrap" }}>
-              {reply.subject && <span style={{ fontWeight: 600, fontSize: "0.85rem" }}>{reply.subject}</span>}
-              {reply.receivedAt && <span className="hint compact" style={{ margin: 0 }}>{new Date(reply.receivedAt).toLocaleString()}</span>}
-            </div>
-            <div style={{ fontSize: "0.85rem", lineHeight: 1.55, whiteSpace: "pre-wrap", border: "1px solid var(--line)", borderRadius: "8px", padding: "0.6rem 0.7rem", background: "var(--bg)" }}>
-              {reply.bodySnippet || "(No message body)"}
-            </div>
+          {(recipient?.title || recipient?.job_post_id || postUrl) && (
+            <Section title="The job">
+              {recipient?.title && <div style={{ fontSize: "0.9rem", fontWeight: 600 }}>{recipient.title}</div>}
+              {tone && <span style={{ color: tone.color, fontWeight: 700, fontSize: "0.8rem" }}>{tone.label}</span>}
+              {postUrl && (
+                <a href={postUrl} target="_blank" rel="noopener noreferrer" className="btn ghost" style={{ alignSelf: "flex-start", fontSize: "0.75rem" }}>
+                  View job post ↗
+                </a>
+              )}
+            </Section>
+          )}
+
+          <Section title={`Conversation${thread.length > 0 ? ` (${thread.length})` : ""}`}>
+            {thread.length === 0 ? (
+              <p className="hint compact" style={{ margin: 0 }}>Nothing on record.</p>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+                {thread.map((item, idx) => (
+                  <ThreadMessage
+                    key={`${item.type}-${idx}`}
+                    item={item}
+                    contactLabel={contactLabel}
+                    showSubject={item.record.subject !== thread[idx - 1]?.record.subject}
+                  />
+                ))}
+              </div>
+            )}
           </Section>
 
           <Section title="Reply">
@@ -193,46 +257,6 @@ export function ResponseDetailPanel({ reply, recipients, roleDefs, sentLog, repl
                 {sending ? "Sending…" : "Send reply"}
               </button>
             </div>
-          </Section>
-
-          {(recipient?.title || recipient?.job_post_id || postUrl) && (
-            <Section title="The job">
-              {recipient?.title && <div style={{ fontSize: "0.9rem", fontWeight: 600 }}>{recipient.title}</div>}
-              {tone && <span style={{ color: tone.color, fontWeight: 700, fontSize: "0.8rem" }}>{tone.label}</span>}
-              {postUrl && (
-                <a href={postUrl} target="_blank" rel="noopener noreferrer" className="btn ghost" style={{ alignSelf: "flex-start", fontSize: "0.75rem" }}>
-                  View job post ↗
-                </a>
-              )}
-            </Section>
-          )}
-
-          {otherReplies.length > 0 && (
-            <Section title={`Other replies from this contact (${otherReplies.length})`}>
-              <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem" }}>
-                {otherReplies.map((rep) => (
-                  <div key={rep.id} style={{ border: "1px solid var(--line)", borderRadius: "8px", padding: "0.5rem 0.65rem", fontSize: "0.8rem" }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", gap: "0.5rem" }}>
-                      {rep.subject && <span style={{ fontWeight: 500 }}>{rep.subject}</span>}
-                      {rep.receivedAt && <span className="hint compact">{new Date(rep.receivedAt).toLocaleString()}</span>}
-                    </div>
-                    {rep.bodySnippet && <div style={{ marginTop: "0.2rem", color: "var(--muted)", whiteSpace: "pre-wrap" }}>{rep.bodySnippet}</div>}
-                  </div>
-                ))}
-              </div>
-            </Section>
-          )}
-
-          <Section title={`Emails sent to this contact${history.length > 0 ? ` (${history.length})` : ""}`}>
-            {history.length === 0 ? (
-              <p className="hint compact" style={{ margin: 0 }}>Nothing on record.</p>
-            ) : (
-              <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem" }}>
-                {history.map((s, idx) => (
-                  <HistoryEntry key={`${s.sentAt}-${idx}`} record={s} />
-                ))}
-              </div>
-            )}
           </Section>
         </div>
       </div>

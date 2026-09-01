@@ -249,6 +249,8 @@ export async function loadState(userId: string): Promise<PersistedState> {
       match_score: r.match_score ?? null,
       match_reasoning: r.match_reasoning || null,
       match_analyzed_at: r.match_analyzed_at || null,
+      ai_summary: r.ai_summary || null,
+      ai_summary_generated_at: r.ai_summary_generated_at || null,
       scraped_at: r.scraped_at,
       hasReplied: !!r.has_replied,
       repliedAt: r.replied_at || undefined,

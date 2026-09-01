@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
+import { supabase } from "@/lib/supabase";
 import {
   roleLabel,
   type Recipient,
@@ -13,11 +14,11 @@ import { matchScoreTone, firstUrl } from "@/lib/jobPosts";
 import { friendlySendError } from "@/lib/friendlyError";
 import { StatusPill } from "./JobPostCard";
 
-// A short excerpt, not the raw scraped post (2026-09-02, operator ask — "show a summary of the post not
-// the actual post... if the user wants to read the post, they can go to the post link itself," which
-// already sits right below this in the UI). Plain truncation, not a new AI call — collapses whitespace
-// (scraped LinkedIn text often has awkward line breaks) and cuts at a word boundary rather than mid-word.
-// If real AI-generated summaries are wanted later, this is the one function to swap.
+// The fallback shown while an AI summary (r.ai_summary, see below) is loading or failed to generate — a
+// short excerpt, not the raw scraped post. Was the primary "The job" content until 2026-09-02 (operator:
+// "AI is being used anyway... why don't we create a summary using AI... what's happening in the background
+// should not be visible to the user, it's bothering me" — the plain-code truncation still read as raw
+// scraped text). Plain truncation, no AI call — collapses whitespace and cuts at a word boundary.
 function summarizePost(text: string, maxChars = 220): string {
   const collapsed = text.replace(/\s+/g, " ").trim();
   if (collapsed.length <= maxChars) return collapsed;
@@ -109,6 +110,10 @@ type Props = {
   history: SentRecord[];
   replies: ReplyRecord[];
   onClose: () => void;
+  // Reports a freshly-generated AI summary back up so the parent's in-memory recipients list picks it up
+  // (see fetchAiSummary below) — the API route already persisted it, this just keeps this session's own
+  // state in sync so reopening the same recipient doesn't ask the network again.
+  onAiSummaryGenerated?: (recipientId: string, summary: string) => void;
 };
 
 // Consolidated "everything about this contact/email" view — a right-side slide-over replacing the old
@@ -117,12 +122,51 @@ type Props = {
 // sidebar from the right side... all the information about the email, like something about the job, the
 // mail that we send, whether there are any follow-ups or not, if we receive a reply, and the link of the
 // posts and everything." One place, not three.
-export function EmailDetailPanel({ recipient: r, roleDefs, history, replies, onClose }: Props) {
+export function EmailDetailPanel({ recipient: r, roleDefs, history, replies, onClose, onAiSummaryGenerated }: Props) {
   // Computed once per mount via a lazy useState initializer, not called inline during render (React
   // Compiler purity rule flags a bare Date.now() in the render body, and still flags it inside useMemo —
   // a useState initializer is the one place the compiler accepts a one-time impure read). This only
   // needs to be "roughly now," not live-ticking.
   const [now] = useState(() => Date.now());
+  // AI job-post summary (2026-09-02) — generated on-demand the first time this panel sees a recipient with
+  // context_text and no ai_summary yet; cached from then on (both server-side via the API route, and here
+  // client-side so a reopen within this session doesn't ask the network again). summaryFailed is a quiet,
+  // permanent-for-this-mount fallback to the plain-text excerpt — no error is ever shown for this, it's an
+  // enhancement over a working fallback, not a critical path.
+  const [summaryFailed, setSummaryFailed] = useState(false);
+
+  useEffect(() => {
+    if (!r.context_text || r.ai_summary || summaryFailed) return;
+    let cancelled = false;
+    async function fetchAiSummary() {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        const res = await fetch("/api/summarize-post", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...(session ? { Authorization: `Bearer ${session.access_token}` } : {}),
+          },
+          body: JSON.stringify({ recipientId: r.id }),
+        });
+        const data = await res.json();
+        if (cancelled) return;
+        if (res.ok && data.success && data.summary) {
+          onAiSummaryGenerated?.(r.id, data.summary);
+        } else {
+          setSummaryFailed(true);
+        }
+      } catch {
+        if (!cancelled) setSummaryFailed(true);
+      }
+    }
+    fetchAiSummary();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [r.id, r.context_text, r.ai_summary, summaryFailed]);
+
   const tone = r.job_post_id ? matchScoreTone(r.match_score) : null;
   const postUrl = firstUrl(r.source_url);
   const sortedHistory = [...history].sort((a, b) => new Date(b.sentAt).getTime() - new Date(a.sentAt).getTime());
@@ -168,9 +212,17 @@ export function EmailDetailPanel({ recipient: r, roleDefs, history, replies, onC
                 </div>
               )}
               {r.context_text && (
-                <p style={{ fontSize: "0.8rem", color: "var(--muted)", lineHeight: 1.55, margin: 0 }}>
-                  {summarizePost(r.context_text)}
-                </p>
+                r.ai_summary ? (
+                  <p style={{ fontSize: "0.8rem", color: "var(--muted)", lineHeight: 1.55, margin: 0 }}>
+                    {r.ai_summary}
+                  </p>
+                ) : summaryFailed ? (
+                  <p style={{ fontSize: "0.8rem", color: "var(--muted)", lineHeight: 1.55, margin: 0 }}>
+                    {summarizePost(r.context_text)}
+                  </p>
+                ) : (
+                  <div className="skeleton-line" style={{ width: "88%" }} />
+                )
               )}
               {postUrl && (
                 <a href={postUrl} target="_blank" rel="noopener noreferrer" className="btn ghost" style={{ alignSelf: "flex-start", fontSize: "0.75rem" }}>

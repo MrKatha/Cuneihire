@@ -304,6 +304,30 @@ export async function parseResumeText(resumeText: string, temperature?: number, 
   };
 }
 
+// Job-post summary (2026-09-02) — backs the Emails detail panel's "The job" section. Replaces a plain-code
+// truncation of the raw scraped post (which still read as raw scraped text, not a real summary) with an
+// actual AI-written one. Generated on-demand (see app/api/summarize-post/route.ts), not at scrape time —
+// the backend's match-scoring pipeline deliberately runs a free algorithm first and only calls Gemini when
+// it can't resolve confidently, so there's no reliable per-post AI call already happening to piggyback
+// this onto; summarizing every scraped post regardless of whether anyone looks at it would be a new,
+// unconditional cost working against that same cost-minimization design.
+const JOB_POST_SUMMARY_SYSTEM_PROMPT = `You write a short, plain-language summary of a job posting for a job candidate. Your only output is a single JSON object — no markdown, no commentary.
+
+You will be given the raw scraped text of a job post (it may include line-break artifacts, irrelevant boilerplate, or be cut off mid-sentence). Summarize only what the job post actually is — the role, what the company is looking for, and any standout requirement or benefit it clearly states. 2-3 sentences.
+
+Never invent a detail not present in the text. Never mention that this text was "scraped," "posted on LinkedIn," or came from an AI — write it as a plain, direct description of the job.
+
+Output ONLY this JSON shape: {"summary": "<2-3 sentence summary>"}`;
+
+export async function summarizeJobPost(contextText: string, temperature?: number, userId?: string): Promise<string> {
+  const prompt = `JOB POST TEXT:\n${truncateForPrompt(contextText.trim(), 6000)}`;
+  const result = await callAiJson(JOB_POST_SUMMARY_SYSTEM_PROMPT, prompt, temperature, userId, "summarize_job_post");
+  if (!result || typeof result.summary !== "string" || !result.summary.trim()) {
+    throw new Error("AI response was not in the expected format.");
+  }
+  return result.summary.trim();
+}
+
 // --- Recruiter portal + AI-assisted ATS (2026-08-19) — see docs/architecture.md ---
 //
 // Own gate/credit pair against automailsend_recruiter_profiles rather than reusing checkAiGate/

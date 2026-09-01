@@ -216,6 +216,11 @@ export type Recipient = {
   match_score?: number | null;
   match_reasoning?: string | null;
   match_analyzed_at?: string | null;
+  // AI-generated job-post summary (2026-09-02) — generated on-demand the first time this recipient's
+  // detail panel is opened (app/api/summarize-post/route.ts), never at scrape time. null/undefined = not
+  // yet generated; the panel falls back to a plain-text truncation client-side until it is.
+  ai_summary?: string | null;
+  ai_summary_generated_at?: string | null;
   scraped_at?: string;
   // Reply monitoring (2026-08-19) — set by the backend's IMAP poller (replyPoll.worker.js) when an
   // inbound message is matched back to something sent to this contact. Never set client-side.

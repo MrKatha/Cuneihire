@@ -1040,3 +1040,16 @@ alter table public.automailsend_app_state
 -- per-tier column, since this is explicitly a temporary, blanket cap rather than a tier differentiator.
 alter table public.automailsend_global_settings
   add column if not exists max_smtp_accounts_per_user integer not null default 1;
+
+-- AI-generated job-post summary (2026-09-02, on-demand + cached). The existing "The job" section only had
+-- a plain-code truncation of the raw scraped post (EmailDetailPanel.tsx's summarizePost) -- still reads
+-- as raw scraped text, not a real summary. Generated lazily, the first time a recipient's detail panel is
+-- opened (frontend/src/app/api/summarize-post/route.ts) -- not at scrape time: the "algorithm first"
+-- match-scoring architecture (see match_source above) deliberately skips a real AI call on most posts, so
+-- there's no reliable per-post AI call to piggyback this onto, and generating for every post at scrape time
+-- would add a new unconditional per-post cost working against that same cost-minimization design.
+-- Denormalized onto automailsend_recipients, same pattern as match_score/match_reasoning -- never
+-- propagated to sibling rows sharing the same job_post_id (rare, acceptable known limitation).
+alter table public.automailsend_recipients
+  add column if not exists ai_summary text,                    -- null = not yet generated
+  add column if not exists ai_summary_generated_at timestamptz;

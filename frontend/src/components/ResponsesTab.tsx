@@ -13,6 +13,10 @@ type Props = {
   sentLog: SentRecord[];
   smtpAccounts: SmtpAccount[];
   userId: string | null;
+  // Deep-link from the new-reply toast (2026-09-02) — see JamsHub.tsx's matching Props comment. Wins over
+  // detailReplyId at render time until cleared; never synced into local state via an effect.
+  pendingReplyFocus?: string | null;
+  onClearPendingReplyFocus?: () => void;
 };
 
 // "Responses" (2026-09-01, renamed from "Monitoring" — see docs/architecture.md; reworked same day into a
@@ -23,7 +27,7 @@ type Props = {
 // through the SMTP account that received it. Shows nothing when there are no replies, deliberately — no
 // job-run/algorithm noise, per the operator's original "if there are no replies there will be nothing to
 // be shown here."
-export function ResponsesTab({ replies, recipients, roleDefs, sentLog, smtpAccounts, userId }: Props) {
+export function ResponsesTab({ replies, recipients, roleDefs, sentLog, smtpAccounts, userId, pendingReplyFocus, onClearPendingReplyFocus }: Props) {
   const [page, setPage] = useState(1);
   // No SSR-safety "mounted" guard needed before rendering the createPortal-based detail panel below (a
   // pattern used elsewhere in this codebase) — `detailReplyId` can only ever become non-null from a user
@@ -37,7 +41,10 @@ export function ResponsesTab({ replies, recipients, roleDefs, sentLog, smtpAccou
   const totalPages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));
   const currentPage = Math.min(page, totalPages);
   const visible = sorted.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
-  const detailReply = detailReplyId ? replies.find((r) => r.id === detailReplyId) || null : null;
+  // A pending focus (from the new-reply toast) always wins over whatever row was locally clicked, until
+  // it's cleared — see the Props comment above.
+  const effectiveDetailReplyId = pendingReplyFocus ?? detailReplyId;
+  const detailReply = effectiveDetailReplyId ? replies.find((r) => r.id === effectiveDetailReplyId) || null : null;
 
   function contextFor(rep: ReplyRecord) {
     const recipient = recipients.find((r) => r.id === rep.recipientId);
@@ -75,7 +82,7 @@ export function ResponsesTab({ replies, recipients, roleDefs, sentLog, smtpAccou
                   return (
                     <tr
                       key={rep.id}
-                      onClick={() => setDetailReplyId(rep.id)}
+                      onClick={() => { setDetailReplyId(rep.id); onClearPendingReplyFocus?.(); }}
                       style={{ borderTop: "1px solid var(--line)", cursor: "pointer" }}
                       className="jams-row"
                     >
@@ -136,7 +143,7 @@ export function ResponsesTab({ replies, recipients, roleDefs, sentLog, smtpAccou
           replies={replies}
           smtpAccounts={smtpAccounts}
           userId={userId}
-          onClose={() => setDetailReplyId(null)}
+          onClose={() => { setDetailReplyId(null); onClearPendingReplyFocus?.(); }}
         />
       )}
     </section>
