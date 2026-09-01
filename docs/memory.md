@@ -2,6 +2,21 @@
 
 Newest on top. Terse bullets only — done / in-progress / locked decisions / open items. Update every phase.
 
+- **2026-09-01 — DONE: JAMS Monitoring tab made human-readable (confirms the earlier guess was right).**
+  Operator: "fix the monitoring section in our JAMS... completely non-understandable to anyone who is
+  reading it." Confirms the read from the previous entry's open item was correct — this WAS the separate
+  ask. `ExecutionLogsPanel.tsx` was a raw backend log viewer (bracketed `[SCRAPER]` tags, monospace
+  messages, a dark-console "Terminal Output" dump, raw `JSON.stringify` fallback) wearing app chrome —
+  entirely a frontend presentation fix, no backend/logger.js changes, no redeploy risk. Job types and
+  statuses now plain language ("LinkedIn search — In progress"), known backend message shapes reworded via
+  a small exact-pattern table (unmatched ones pass through unchanged, nothing hidden), the terminal block
+  replaced with a plain colored-dot step list, raw JSON demoted to a collapsed "Show raw data" toggle only
+  when nothing else is parseable. Also fixed a real bug found along the way: the "Next Run" countdown used
+  the single most recent log *of any job type* but computed it against the LinkedIn-search interval —
+  wrong number whenever the latest entry was an automail/follow-up/reply-check log. Scoped to the latest
+  scraper-type log and relabeled "Next LinkedIn search in" so it's unambiguous. Full breakdown:
+  `docs/architecture.md`. Build clean, lint actually **improved** to 142 (was 144) — this file's own `any`
+  types got properly typed while every line was already being touched. Pushed to master+staging.
 - **2026-09-01 — DONE: JAMS Emails tab — click a row for full detail, real 15/page pagination.** Operator:
   "all the emails should be clickable... a popup like a sidebar from the right side... all the information
   about the email... whether there are any follow-ups or not, if we receive a reply, and the link of the

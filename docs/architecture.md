@@ -233,6 +233,39 @@ CRM], monitoring — and merge settings into a similar layout") collapsed that b
   internally) became "Emails" — trimmed its own outer `<section className="panel">` wrapper since `JamsHub`
   now owns that shell; its daily-limit chip moved inline into the body instead. "Monitoring" is a bare
   `ExecutionLogsPanel`.
+
+  **`ExecutionLogsPanel.tsx` rewritten for readability (2026-09-01)** — operator: "this section is
+  completely non-understandable to anyone who is reading it." It was, structurally, a raw backend log
+  viewer wearing the app's panel chrome: `jobType` shown as an uppercase bracketed tag (`[SCRAPER]`), each
+  entry's message in a monospace font, and an expandable "Terminal Output" block rendering
+  `details.logs` (backend/src/lib/logger.js's `[hh:mm:ss] [LEVEL] message` lines) on a literal dark VS
+  Code-style console, falling back to `JSON.stringify(details)` for anything it didn't recognize. None of
+  that changed backend-side — this was entirely a frontend presentation fix, same reasoning as the Emails
+  tab rework above (no redeploy risk, no shared-closure changes to the actual worker/logger code):
+  - `JOB_TYPE_LABELS`/`STATUS_LABELS` maps turn `scraper`/`jobspy`/`automail`/`follow_up`/`reply_poll` +
+    `running`/`success`/`error` into plain language ("LinkedIn search — In progress", etc.), styled like
+    `JobPostCard.tsx`'s `StatusPill` (colored dot + label) instead of a bracketed monospace tag.
+  - `humanizeMessage()` — a small exact-pattern rewrite table for the known backend message shapes (see
+    the grep of every `logger.start()`/`logger.finish()` call site across the workers), e.g. "Execution
+    finished. Inserted 3 new unique records." → "Found 3 new contacts". Anything that doesn't match a
+    known pattern passes through unchanged rather than being hidden — nothing backend-authored is lost,
+    it just isn't specially reworded.
+  - The terminal console is gone. `details.logs` lines are parsed (`parseLogLine`) and rendered as a plain
+    "What happened, step by step" list — colored dot per level (reusing `--ok`/`--warn`/`--danger`/
+    `--muted`, not a hardcoded `#1e1e1e` console background) + plain text, no monospace.
+  - The raw `JSON.stringify` fallback only appears (behind a de-emphasized "Show raw data" toggle,
+    collapsed by default) when a log truly has no recognized structure at all — not the default view for
+    every entry with details, which is what it was before.
+  - **Real bug fixed, not just cosmetic**: the "Next Run" countdown used to key off `logs[0]` — the single
+    most recent log across *every* job type — but compute it against `intervalMin`
+    (`auto_fetch_interval_min`), which is specifically the LinkedIn-search cadence. If the latest entry
+    happened to be an automail/follow-up/reply-check log (routine, since jobs interleave), the countdown
+    showed a number computed against the wrong job's schedule — an actual correctness bug, not only a
+    labeling one. Fixed by scoping the lookup to the latest `jobType === "scraper"` log and relabeling it
+    "Next LinkedIn search in" so it's unambiguous which job the number describes.
+  - Build+lint clean; this file's own `any` types (`details: any`, `LogItem`'s untyped props) got properly
+    typed along the way since every line was already being touched — lint count went from the 144 baseline
+    to **142** (2 fewer errors), not just held flat.
 - **`SettingsTab.tsx` was first rewritten as a tabbed page (Automation/Connections/Account), then corrected
   same pass to a flat grid of bordered cards** — matching `JamsOverviewTab`'s own stat-tile/card visual
   language rather than adding a second internal nav pattern (operator: "a similar layout to the dashboard").
