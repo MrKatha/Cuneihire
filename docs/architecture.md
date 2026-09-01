@@ -583,7 +583,41 @@ received any of several template/resume variants, `automailsend_sent_log` needed
 (`templateLabel: "Custom"` when the send used a hand-written draft with no library template at all). A
 label snapshot, deliberately not a foreign key — the library row can be renamed, edited, or deleted after
 the fact, and the log should keep reflecting what was actually sent, not what the row says today. Shown in
-`JamsTab.tsx`'s per-recipient send history and its "Sent Email Preview" modal.
+`EmailDetailPanel.tsx`'s per-recipient send history (see "JAMS Emails tab: detail panel + real pagination"
+below — the standalone "Sent Email Preview" modal this used to reference is gone, folded into that panel).
+
+### JAMS Emails tab: detail panel + real pagination (2026-09-01)
+Operator ask, verbatim: "all the emails should be clickable... a popup like a sidebar from the right
+side... all the information about the email, like something about the job, the mail that we send, whether
+there are any follow-ups or not, if we receive a reply, and the link of the posts and everything" +
+"I need pagination in our emails. Only 15 emails should be visible on one page."
+
+- **`EmailDetailPanel.tsx` (new)** — a right-side slide-over, opened by clicking anywhere on a contact's
+  row in `JamsTab.tsx`. Consolidates what used to be split across two places: an inline expand-row (send
+  history + replies) and a separate small centered modal (one sent email's subject/body). Now one place:
+  job title/match score/reasoning/context snippet/post link, follow-up count + next-scheduled date (from
+  `Recipient.followUpCount`/`SentRecord.nextFollowUpAt`), every reply, and full send history with each
+  entry's subject/body viewable inline (`HistoryEntry`'s own expand toggle, not a second modal layered on
+  top of the slide-over). Tracked by the recipient's id in `JamsTab.tsx`, not a snapshot of the row object
+  — re-looked-up from the live `recipients` prop each render, so a reply or follow-up landing while the
+  panel is open shows up without needing to close and reopen it.
+- **New CSS pattern**: `.side-panel`/`.side-panel-backdrop`/`.side-panel-head`/`.side-panel-body` in
+  `globals.css` — distinct from the existing `.modal-card` (centered dialog); this one docks to the right
+  edge, full viewport height. First use of this pattern in the app; reuse it for the next "full detail on
+  one item" panel rather than reaching for a centered modal or a third pattern.
+- **Real pagination, 15/page**, replacing the old infinite-scroll `IntersectionObserver` (`visibleCount`
+  growing by 50 on scroll). `page` state is clamped against the filtered result count
+  (`Math.min(page, totalPages)`) rather than force-reset via an effect on every filter/search change — this
+  repo's React Compiler lint config flags both `setState`-in-`useEffect` and reading/writing a ref during
+  render (the two standard patterns for "reset state when some other value changes"), so the clamp alone
+  is what keeps `page` always valid; the one behavioral difference from a hard reset is that switching
+  between two filters that both have multiple pages keeps the same page *number* rather than jumping to
+  page 1, which is a minor nuance, not a bug.
+- **Bulk Send/Delete Selected now scoped to `filtered`, not `visible`** — before pagination, `visible` was
+  "everything loaded so far," so a selection rarely fell out of scope by accident; with real pages, staying
+  scoped to just the current page would have silently dropped a page-1 selection when the operator paged to
+  page 2, while the "N selected" chip (which counts every selected id) kept implying otherwise. Fixed by
+  deriving `selectedRecipients` from `filtered` instead.
 
 ## Resume Builder (2026-08-18)
 A resumai.com-style structured builder — genuinely separate from the `automailsend_resumes` file library
