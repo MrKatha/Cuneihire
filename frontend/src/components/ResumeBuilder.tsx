@@ -1038,7 +1038,9 @@ export function FormSection({ title, children, atomKey }: { title: string; child
   );
 }
 
-function PersonalInfoSection({ data, onChange }: SectionProps) {
+// Exported alongside the others below (2026-08-31, public resume builder) -- was local-only since nothing
+// outside this file needed it before now. Zero behavior change, additive only.
+export function PersonalInfoSection({ data, onChange }: SectionProps) {
   const p = data.personalInfo;
   function set(patch: Partial<ResumeData["personalInfo"]>) {
     onChange({ personalInfo: { ...p, ...patch } });
@@ -1058,7 +1060,7 @@ function PersonalInfoSection({ data, onChange }: SectionProps) {
   );
 }
 
-function SummarySection({ data, onChange }: SectionProps) {
+export function SummarySection({ data, onChange }: SectionProps) {
   return (
     <FormSection title="Summary" atomKey="summary">
       <AutoGrowTextarea value={data.summary} maxHeight={160} onChange={(e) => onChange({ summary: e.target.value })} placeholder="A few sentences about you…" />
@@ -1210,7 +1212,7 @@ export function ProjectsSection({ data, onChange }: SectionProps) {
   );
 }
 
-function SkillsSection({ data, onChange }: SectionProps) {
+export function SkillsSection({ data, onChange }: SectionProps) {
   const [input, setInput] = useState("");
   // Comma-separated ("React, Node.js, PostgreSQL") adds each as its own chip — same as ProfileTab's
   // skill adder (2026-08-19).
@@ -1313,7 +1315,7 @@ export function LanguagesSection({ data, onChange }: SectionProps) {
 // `style`/`onChange` since ResumeTemplateId isn't part of ResumeStyleSettings — it lives on the
 // ResumeProfile row (scratch mode) or ResumeBuilder's own profileTemplateIds state (profile mode), not on
 // ResumeData itself.
-function StyleSection({ style, onChange, templateId, onTemplateChange }: {
+export function StyleSection({ style, onChange, templateId, onTemplateChange }: {
   style: ResumeStyleSettings;
   onChange: (patch: Partial<ResumeStyleSettings>) => void;
   templateId: ResumeTemplateId;
