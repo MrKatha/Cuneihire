@@ -133,7 +133,18 @@ export function JamsHub({
         )}
 
         {subTab === "responses" && (
-          userId ? <ResponsesTab replies={replies} recipients={recipients} roleDefs={roleDefs} /> : <p className="hint">Sign in to see your responses.</p>
+          userId ? (
+            <ResponsesTab
+              replies={replies}
+              recipients={recipients}
+              roleDefs={roleDefs}
+              sentLog={sentLog}
+              smtpAccounts={smtpAccounts}
+              userId={userId}
+            />
+          ) : (
+            <p className="hint">Sign in to see your responses.</p>
+          )
         )}
       </div>
     </section>

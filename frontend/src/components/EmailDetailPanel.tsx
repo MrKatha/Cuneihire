@@ -30,7 +30,10 @@ function formatFriendlyError(errorMsg?: string) {
   return "Something went wrong while sending this email.";
 }
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+// Exported (2026-09-01) so ResponseDetailPanel.tsx can reuse the same section/history-entry presentation
+// instead of duplicating it — both panels show overlapping content (job context, send history), just in a
+// different order/emphasis.
+export function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
       <h3 style={{ margin: 0, fontSize: "0.72rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--muted)" }}>
@@ -41,7 +44,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
-function HistoryEntry({ record }: { record: SentRecord }) {
+export function HistoryEntry({ record }: { record: SentRecord }) {
   const [expanded, setExpanded] = useState(false);
   const [showWhy, setShowWhy] = useState(false);
   // Computed once per mount via a lazy useState initializer, not called inline during render (React
