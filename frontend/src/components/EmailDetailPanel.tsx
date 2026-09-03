@@ -14,17 +14,21 @@ import { matchScoreTone, firstUrl } from "@/lib/jobPosts";
 import { friendlySendError } from "@/lib/friendlyError";
 import { StatusPill } from "./JobPostCard";
 
-// The fallback shown while an AI summary (r.ai_summary, see below) is loading or failed to generate — a
-// short excerpt, not the raw scraped post. Was the primary "The job" content until 2026-09-02 (operator:
-// "AI is being used anyway... why don't we create a summary using AI... what's happening in the background
-// should not be visible to the user, it's bothering me" — the plain-code truncation still read as raw
-// scraped text). Plain truncation, no AI call — collapses whitespace and cuts at a word boundary.
+// The fallback shown when no AI description exists yet for this recipient — a plain-text excerpt, not AI
+// writing. As of 2026-09-03 this is the backend batch classifier's fail-open case (AI unavailable/exhausted
+// when this post was scraped) or an old pre-classifier recipient still waiting on the on-demand
+// /api/summarize-post backlog bridge — was the ONLY "The job" content until 2026-09-02 (operator: "AI is
+// being used anyway... why don't we create a summary using AI... what's happening in the background should
+// not be visible to the user, it's bothering me" — the plain-code truncation still read as raw scraped
+// text). Plain truncation, no AI call — preserves real line/paragraph breaks (only collapses runs of spaces/
+// tabs, and collapses 3+ blank lines down to one) instead of flattening the whole post into one line, then
+// cuts at a word boundary. Paired with `whiteSpace: "pre-wrap"` wherever this renders.
 function summarizePost(text: string, maxChars = 220): string {
-  const collapsed = text.replace(/\s+/g, " ").trim();
+  const collapsed = text.replace(/[^\S\n]+/g, " ").replace(/\n{3,}/g, "\n\n").trim();
   if (collapsed.length <= maxChars) return collapsed;
   const cut = collapsed.slice(0, maxChars);
-  const lastSpace = cut.lastIndexOf(" ");
-  return `${(lastSpace > maxChars * 0.6 ? cut.slice(0, lastSpace) : cut).trim()}…`;
+  const lastBreak = Math.max(cut.lastIndexOf(" "), cut.lastIndexOf("\n"));
+  return `${(lastBreak > maxChars * 0.6 ? cut.slice(0, lastBreak) : cut).trim()}…`;
 }
 
 // Exported (2026-09-01) so ResponseDetailPanel.tsx can reuse the same section/history-entry presentation
@@ -131,11 +135,17 @@ export function EmailDetailPanel({ recipient: r, roleDefs, history, replies, onC
   // a useState initializer is the one place the compiler accepts a one-time impure read). This only
   // needs to be "roughly now," not live-ticking.
   const [now] = useState(() => Date.now());
-  // AI job-post summary (2026-09-02) — generated on-demand the first time this panel sees a recipient with
-  // context_text and no ai_summary yet; cached from then on (both server-side via the API route, and here
-  // client-side so a reopen within this session doesn't ask the network again). summaryFailed is a quiet,
-  // permanent-for-this-mount fallback to the plain-text excerpt — no error is ever shown for this, it's an
-  // enhancement over a working fallback, not a critical path.
+  // AI job-post description — as of 2026-09-03 the PRIMARY path is the backend's own batched
+  // classifyJobPosts() call (backend/src/services/ai.service.js), which writes ai_summary directly at
+  // scrape time (scraper.worker.js's finalizeAndInsertGroup) using the same read that already decided this
+  // post is a real job posting — no separate per-view Gemini call for any newly-scraped recipient. This
+  // on-demand fetch (2026-09-02, kept 2026-09-03) is now only the BACKLOG/FAIL-OPEN BRIDGE: it fires the
+  // first time this panel sees a recipient with context_text and no ai_summary yet — either an old
+  // recipient scraped before this feature existed, or a new one saved while AI classification was
+  // unavailable that run (credits/quota exhausted) — and caches from then on (server-side via the API
+  // route, and here client-side so a reopen within this session doesn't ask the network again).
+  // summaryFailed is a quiet, permanent-for-this-mount fallback to the plain-text excerpt — no error is
+  // ever shown for this, it's an enhancement over a working fallback, not a critical path.
   const [summaryFailed, setSummaryFailed] = useState(false);
 
   useEffect(() => {
@@ -216,11 +226,11 @@ export function EmailDetailPanel({ recipient: r, roleDefs, history, replies, onC
               )}
               {r.context_text && (
                 r.ai_summary ? (
-                  <p style={{ fontSize: "0.8rem", color: "var(--muted)", lineHeight: 1.55, margin: 0 }}>
+                  <p style={{ fontSize: "0.8rem", color: "var(--muted)", lineHeight: 1.55, margin: 0, whiteSpace: "pre-wrap" }}>
                     {r.ai_summary}
                   </p>
                 ) : summaryFailed ? (
-                  <p style={{ fontSize: "0.8rem", color: "var(--muted)", lineHeight: 1.55, margin: 0 }}>
+                  <p style={{ fontSize: "0.8rem", color: "var(--muted)", lineHeight: 1.55, margin: 0, whiteSpace: "pre-wrap" }}>
                     {summarizePost(r.context_text)}
                   </p>
                 ) : (

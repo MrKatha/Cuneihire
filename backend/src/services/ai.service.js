@@ -425,6 +425,62 @@ ${criteria || "None set."}`;
   return { score, reasoning };
 }
 
+// Job-provider classification + clean description (2026-09-03, operator-reported bug — a job-SEEKER's own
+// post got emailed as if its author were the employer). `looksLikeJobPost` (matchAlgorithm.service.js) only
+// ever caught promo/ad spam that happened to match search keywords — it never asked "is the AUTHOR of this
+// post an employer or a candidate," and a job-seeker's "I'm looking for a role as an engineer..." post trips
+// the same HIRING_SIGNAL_RE phrasing a real employer's post would, so it sailed straight through as
+// job_or_unknown. This closes that gap with a real read of the post.
+//
+// Deliberately BATCHED — many posts, one Gemini call — not one-call-per-post: the platform's one shared
+// Gemini key is deliberately still on the free tier's 20-requests/DAY ceiling across every user
+// (docs/pricing-tiers.md), so a naive per-post design could exhaust it from job-filtering alone in a single
+// scrape run. Batching also doubles as the "clean caption" step the operator asked for separately ("keep the
+// context short... don't generate descriptions right there... AI-based assembly just provides the filtered
+// job caption as a job description") — the SAME read that classifies a post also produces its user-facing
+// description, so there's no separate summarization call competing for the same scarce quota. See
+// scraper.worker.js's finalizeClassifiedContacts for the caller/batching logic.
+const JOB_CLASSIFY_SYSTEM_PROMPT = `You review a batch of scraped LinkedIn posts that already matched a job candidate's search keywords, and decide which ones are genuine posts from an employer/recruiter/hiring manager OFFERING a job — as opposed to a job-SEEKER's own post about looking for work, or anything else that isn't really a hiring post. Your only output is a single JSON object — no markdown, no commentary.
+
+You will be given POSTS, a numbered list of raw scraped LinkedIn post captions (each may be noisy, partial, or contain leftover UI text like "Like Comment Share" or hashtag clusters — ignore that, judge only the substantive content).
+
+For EACH post, decide:
+- isJobProvider: true only when the post's author is clearly OFFERING a job/opportunity on behalf of a company or as a recruiter/hiring manager (e.g. "We're hiring a...", "My team is looking for...", "Reach out if you or someone you know..."). false when the author is describing THEMSELVES as the candidate/job-seeker (e.g. "I'm an engineer looking for my next role", "Open to work", "I have 5 years of experience and I'm seeking..."), or the post isn't really about a job opening at all.
+- reasoning: one short sentence (under 160 characters) explaining the call — cite the specific phrase/signal that drove it.
+- description: ONLY when isJobProvider is true — a clean, plain-text description of the job opportunity using ONLY facts actually stated in the post. Real line breaks between distinct facts (role/title, key requirements, location/work mode, how to apply), no invented details, no LinkedIn boilerplate ("Like Comment Share", follower counts, "See translation", hashtag clusters) carried into it. 2-5 short lines. Omit this field (or use an empty string) when isJobProvider is false.
+
+Output ONLY this JSON shape: {"results": [{"isJobProvider": <boolean>, "reasoning": "<string>", "description": "<string>"}, ...]} — one entry per post, in the SAME order as POSTS, same length as POSTS.`;
+
+// Per-post caption cap — this call batches many posts into ONE prompt, so per-post length matters more than
+// in scoreJobMatch's single-post prompt (which doesn't truncate contextText at all). 600 chars is enough for
+// a LinkedIn hiring post's substance (title, a few requirements, how to apply) while keeping a full
+// CLASSIFY_BATCH_SIZE-post batch short — operator ask, "keep the context short."
+const CLASSIFY_CAPTION_MAX_LEN = 600;
+
+function buildJobClassifyPrompt(posts) {
+  const list = posts
+    .map((p, i) => `${i + 1}. ${truncateForPrompt((p.contextText || "").trim(), CLASSIFY_CAPTION_MAX_LEN) || "(no text captured)"}`)
+    .join("\n\n");
+  return `POSTS:\n${list}`;
+}
+
+// Returns an array of { isJobProvider, reasoning, description }, SAME length/order as `posts`, or null if
+// the AI response didn't come back in the expected shape — caller (scraper.worker.js) fails open on null,
+// same "unclassified is never a hard fail" convention as everywhere else AI touches this pipeline. A
+// malformed individual entry also fails open (isJobProvider defaults true) rather than silently dropping a
+// possibly-legitimate lead over one bad sub-object.
+async function classifyJobPosts(posts, temperature, userId) {
+  if (!Array.isArray(posts) || posts.length === 0) return null;
+  const prompt = buildJobClassifyPrompt(posts);
+  const result = await callAiJson(JOB_CLASSIFY_SYSTEM_PROMPT, prompt, temperature, userId, "classify_job_posts");
+  if (!result || !Array.isArray(result.results) || result.results.length !== posts.length) return null;
+  return result.results.map((r) => ({
+    isJobProvider: r && typeof r.isJobProvider === "boolean" ? r.isJobProvider : true,
+    reasoning: r && typeof r.reasoning === "string" ? r.reasoning.slice(0, 200).trim() : "",
+    description: r && r.isJobProvider && typeof r.description === "string" && r.description.trim() ? r.description.trim().slice(0, 2000) : null,
+  }));
+}
+
 // AI-curated match keywords (2026-08-28 follow-up, Phase 2 task 1 addendum) — translates a role's free-text
 // ai_instructions into a bounded, literal keyword/phrase list a cheap substring check can use against
 // future scraped post text, instead of scoreJobMatch reading the full post on every single one. Deliberately
@@ -525,6 +581,7 @@ module.exports = {
   applyPlaceholders,
   hasUnresolvedPlaceholders,
   scoreJobMatch,
+  classifyJobPosts,
   generateMatchKeywords,
   matchKeywordsAreStale,
 };

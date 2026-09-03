@@ -79,6 +79,14 @@ async function processJobLogic(userId, logger, mappings, aiEnabled, aiCredits, a
         continue;
       }
 
+      // TRIP-WIRE (2026-09-03): scraper.worker.js's LinkedIn-side twin of this function gained a second
+      // gate here — a batched AI classifyJobPosts() call (ai.service.js) that rejects a job-SEEKER's own
+      // post, which looksLikeJobPost above never catches (it only catches promo/ad spam). This file was
+      // deliberately NOT updated to match (dev/staging-only, jobspy_sourcing_enabled, not customer-facing —
+      // see the header comment above), so an Indeed-sourced job-seeker post can still slip through today.
+      // Mirror scraper.worker.js's collectContacts/finalizeAndInsertGroup/finalizeClassifiedContacts split
+      // before jobspy_sourcing_enabled is ever turned on for real users.
+
       let jobPost = jobPostCache.get(listing.job_url);
       if (jobPost === undefined) {
         const { data, error } = await supabase

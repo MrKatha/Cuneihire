@@ -2,6 +2,24 @@
 
 Newest on top. Terse bullets only — done / in-progress / locked decisions / open items. Update every phase.
 
+- **2026-09-03 — DONE: AI job-provider classification gate — stops emailing job-seekers as if they were
+  employers.** Operator: sent a mail to someone searching for a job, not offering one — `looksLikeJobPost`
+  only ever caught promo/ad spam, never checked post authorship. Fix: batched (not per-post) AI
+  classification in `scraper.worker.js`, deferred until the whole scrape run's keyword/page loop finishes,
+  ~1 extra Gemini call per run (not per post) — deliberately designed around the platform's shared
+  20-requests/day free-tier ceiling. Fails open on quota exhaustion/AI-disabled (posts save unclassified,
+  same as before this feature existed) rather than holding back every contact platform-wide. Same call also
+  writes a clean, formatted job description straight into `ai_summary` at insert time (no second
+  summarization call) — the 2026-09-02 on-demand summary route is kept only as the backlog/fail-open bridge,
+  not deleted. `jobspy.worker.js` (dev/staging-only) got a trip-wire comment, not a mirrored fix. Hand-
+  verified against a job-seeker caption (correctly rejected) and a genuine hiring caption (correctly
+  accepted with a clean 4-line description) before considering this done. No new migration. Full breakdown:
+  `docs/architecture.md`.
+- **2026-09-03 — DONE: reply indicators (badge + reply cards) now actually navigate.** Operator: reply
+  buttons "not taking me to the reply section." Root cause: only the new-reply toast (2026-09-02) had
+  navigation wired — the "↩ Replied" badge and EmailDetailPanel's reply cards were static markup with no
+  onClick. Both now use the same `pendingReplyFocus` mechanism via a new `onViewReply` callback threaded
+  page.tsx → JamsHub → JamsTab → EmailDetailPanel. Frontend-only, deployed, confirmed live.
 - **2026-09-02 — DONE: fixed scraper bug leaking LinkedIn's own RSC-style "$L<hex>" reference tokens into
   context_text.** Operator saw literal "$L4 $L13 $L17..." text in the job-post summary; traced to the DB —
   LinkedIn's post-search response uses a React-Server-Components-style wire format (already documented in

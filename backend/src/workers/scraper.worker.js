@@ -2,7 +2,7 @@ const pc = require("picocolors");
 const axios = require("axios");
 const { supabase } = require("../config/supabase");
 const { extractContactsWithAttribution, extractInitialContacts, extractPaginatedContacts } = require("../services/extraction.service");
-const { scoreJobMatch, generateMatchKeywords, matchKeywordsAreStale } = require("../services/ai.service");
+const { scoreJobMatch, classifyJobPosts, generateMatchKeywords, matchKeywordsAreStale } = require("../services/ai.service");
 const { roleHasCriteria, computeAlgorithmicMatch, shouldEscalateToAI, looksLikeJobPost } = require("../services/matchAlgorithm.service");
 const { ExecutionLogger } = require("../lib/logger");
 const { getGlobalSettings } = require("../lib/globalSettings");
@@ -122,6 +122,14 @@ async function processJobLogic(job, logger, mappings, aiEnabled, aiCredits, aiTe
   const successfullyInsertedEmails = [];
   const successfullyInsertedPhones = [];
 
+  // Two-pass AI job-provider classification (2026-09-03, operator-reported bug: a job-SEEKER's own post was
+  // getting emailed as if its author were the employer — looksLikeJobPost only catches promo/ad spam, not
+  // this). Every looksLikeJobPost-survivor across the WHOLE run is queued here; classifyJobPosts
+  // (ai.service.js) runs AFTER the mappings loop finishes, in size-capped batches — see
+  // finalizeClassifiedContacts below. Deliberately batched (not one Gemini call per post) — the platform's
+  // one shared Gemini key is still on the free tier's 20-requests/day ceiling across every user.
+  const classificationQueue = [];
+
   await logger.append("INFO", "Fetching existing contacts from DB to prevent duplicates...");
   const { data: existingData } = await supabase
     .from('automailsend_recipients')
@@ -191,7 +199,11 @@ async function processJobLogic(job, logger, mappings, aiEnabled, aiCredits, aiTe
   // if the owning post couldn't be determined). See extraction.service.js's extractContactsWithAttribution.
   // `keyword` is the search term that found this group — used as a stand-in job title (see below).
   // `roleDef` is the full role row (not just the key) — needed to score this post against its rules.
-  const saveContacts = async (groups, roleToAssign, keyword, roleDef) => {
+  // Phase 1 of the collect -> classify -> finalize split (2026-09-03 — see classificationQueue above).
+  // Dedup + the free looksLikeJobPost regex gate, unchanged from before this feature existed. A survivor no
+  // longer goes straight to getJobPost/scoring/insert — it's queued for AI job-provider classification once
+  // the WHOLE run's keyword/page loop finishes (finalizeClassifiedContacts, below).
+  const collectContacts = async (groups, roleToAssign, keyword, roleDef) => {
     for (const group of groups) {
       // Dedup FIRST, before spending anything (2026-08-28, operator ask — checking "does this contact
       // already exist" needs to happen as early as possible, before an AI credit is spent, not after).
@@ -206,13 +218,36 @@ async function processJobLogic(job, logger, mappings, aiEnabled, aiCredits, aiTe
       // with only plain search keywords (no exclude_keywords/ai_instructions/structured fields) had
       // NOTHING checking this before. Runs before the job-post upsert/scoring below so a rejected post
       // never costs a DB row, a credit, or a send — same "reject before spending anything" ordering as the
-      // dedup check just above. Zero AI cost either way.
+      // dedup check just above. Zero AI cost either way. (This only catches promo/ad spam, not a
+      // job-seeker's own post — see the AI classification pass below for that.)
       const jobPostCheck = looksLikeJobPost(group.contextText);
       if (jobPostCheck.verdict === "not_a_job") {
         await logger.append("INFO", `Skipped a non-job post for role '${roleToAssign}': ${jobPostCheck.reasoning}`);
         continue;
       }
 
+      // Claim these emails/phones NOW, at collection time (2026-09-03) — not at insert time like before
+      // this feature existed. Classification is deferred until the whole run's keyword/page loop finishes,
+      // so this group's fate isn't decided here any more; without claiming now, the same new contact
+      // appearing on two different posts found later in this same run (both still awaiting classification)
+      // would both survive this dedup check and could both reach the insert step — there's no DB unique
+      // constraint on email to catch that. Trade-off, accepted as bounded and rare: if THIS post is later
+      // rejected by classification, a second legitimate post for the same contact found later in this same
+      // run won't get a chance until the NEXT run (allEmails/allPhones reload fresh from the DB every run,
+      // see above) — far smaller risk than duplicate sends.
+      newEmails.forEach(e => allEmails.add(e.toLowerCase()));
+      newPhones.forEach(p => allPhones.add(p));
+
+      classificationQueue.push({ group, roleToAssign, keyword, roleDef, newEmails, newPhones });
+    }
+  };
+
+  // Phase 3 of the collect -> classify -> finalize split — the getJobPost -> JAMS scoring ->
+  // match-strictness -> recipient-insert pipeline, unchanged from before this feature existed except for
+  // `continue` becoming `return` (this is now its own function, not a loop body) and the new `aiDescription`
+  // param. Runs once per classification-queue entry that survived (or skipped, fail-open) AI classification
+  // — see finalizeClassifiedContacts below, which is the only caller.
+  const finalizeAndInsertGroup = async ({ group, roleToAssign, keyword, roleDef, newEmails, newPhones }, aiDescription) => {
       // Resolve + score the job post only once we know there's actually something new to potentially
       // insert. This DOES mean a post whose every contact was already captured before AI matching
       // existed stays unscored by the live scraper going forward too — that's fine, since there's
@@ -308,7 +343,7 @@ async function processJobLogic(job, logger, mappings, aiEnabled, aiCredits, aiTe
           "INFO",
           `Not saving ${newEmails.length + newPhones.length} contact(s) — job post scored ${matchScore}/100 for role '${roleToAssign}' (below your ${matchStrictness} threshold): ${matchReasoning || "no reasoning given"}`
         );
-        continue;
+        return;
       }
 
       const newContactsToInsert = [];
@@ -339,6 +374,12 @@ async function processJobLogic(job, logger, mappings, aiEnabled, aiCredits, aiTe
           author_name: group.authorName || null,
           // Denormalized JAMS match fields (same reasoning) — empty object when not scored this pass.
           ...matchFields,
+          // AI-classified job description (2026-09-03) — the SAME batched AI read that decided this post
+          // is a real job posting also produced this clean, formatted description; no separate
+          // summarization call. Only set when classification actually ran and accepted this post — a
+          // fail-open/unclassified insert leaves these null, same as before this feature existed (the
+          // frontend's on-demand /api/summarize-post route is the backlog bridge for those rows).
+          ...(aiDescription ? { ai_summary: aiDescription, ai_summary_generated_at: new Date().toISOString() } : {}),
           scraped_at: new Date().toISOString(),
           status: "pending",
         });
@@ -346,14 +387,89 @@ async function processJobLogic(job, logger, mappings, aiEnabled, aiCredits, aiTe
            await logger.append("ERROR", `Supabase insert error: ${error.message}`);
         } else {
            totalInserted++;
-           if (emailToInsert) {
-             allEmails.add(emailToInsert);
-             successfullyInsertedEmails.push(emailToInsert);
-           }
-           if (phoneToInsert) {
-             allPhones.add(phoneToInsert);
-             successfullyInsertedPhones.push(phoneToInsert);
-           }
+           if (emailToInsert) successfullyInsertedEmails.push(emailToInsert);
+           if (phoneToInsert) successfullyInsertedPhones.push(phoneToInsert);
+        }
+      }
+  };
+
+  const CLASSIFY_BATCH_SIZE = 20;
+
+  // Phase 2 of the collect -> classify -> finalize split. Runs ONCE, after the entire mappings loop (every
+  // keyword, every page) has finished collecting candidates — not per keyword, not per page. This is what
+  // keeps this feature to roughly ONE extra Gemini call per scrape run instead of one per post: every
+  // looksLikeJobPost-survivor from the whole run is batched here. See ai.service.js's classifyJobPosts for
+  // the prompt/shape. Fails open on any unavailability (AI disabled, credits exhausted, call throws, or a
+  // malformed response) — every affected post proceeds to finalizeAndInsertGroup unclassified, exactly as
+  // if this feature didn't exist, rather than holding back every contact platform-wide whenever the shared
+  // 20-requests/day quota happens to already be spent.
+  const finalizeClassifiedContacts = async () => {
+    if (classificationQueue.length === 0) return;
+
+    // Dedup by source_url — the same post can be queued multiple times (different new contact, different
+    // keyword/page) but only needs ONE classification read. Entries with no source_url (legacy-extractor
+    // fallback) can't be grouped this way — each is its own singleton "post".
+    const postsByUrl = new Map();
+    const singletonPosts = [];
+    for (const entry of classificationQueue) {
+      const url = entry.group.source_url;
+      if (!url) {
+        singletonPosts.push({ contextText: entry.group.contextText, entries: [entry] });
+        continue;
+      }
+      if (!postsByUrl.has(url)) postsByUrl.set(url, { contextText: entry.group.contextText, entries: [] });
+      postsByUrl.get(url).entries.push(entry);
+    }
+    const distinctPosts = [...postsByUrl.values(), ...singletonPosts];
+
+    await logger.append(
+      "INFO",
+      `Classifying ${distinctPosts.length} candidate job post(s) (${classificationQueue.length} contact(s) queued) with AI before saving any of them...`
+    );
+
+    let classificationUnavailable = false;
+    for (let i = 0; i < distinctPosts.length; i += CLASSIFY_BATCH_SIZE) {
+      const chunk = distinctPosts.slice(i, i + CLASSIFY_BATCH_SIZE);
+      let results = null;
+
+      if (classificationUnavailable) {
+        // Already logged once below — don't spam, don't retry a budget/endpoint that just failed.
+      } else if (!aiEnabled || !(remainingCredits > 0)) {
+        await logger.append(
+          "WARN",
+          `AI job-provider classification unavailable (${!aiEnabled ? "AI personalization off" : "out of AI credits"}) — the remaining ${distinctPosts.length - i} candidate post(s) will be saved unclassified this run, same as before this feature existed.`
+        );
+        classificationUnavailable = true;
+      } else {
+        try {
+          results = await classifyJobPosts(chunk.map(p => ({ contextText: p.contextText })), aiTemperature, user_id);
+          const spent = await spendAiCredit(supabase, user_id);
+          remainingCredits = spent ? remainingCredits - 1 : 0;
+          if (results) {
+            await logger.append("INFO", `AI classified a batch of ${chunk.length} post(s) (1 AI credit).`);
+          } else {
+            await logger.append("WARN", `AI classification response for a batch of ${chunk.length} post(s) wasn't in the expected shape — treating this batch as unclassified.`);
+          }
+        } catch (err) {
+          await logger.append("WARN", `AI job-provider classification failed: ${err.message} — this and any remaining candidate post(s) will be saved unclassified for the rest of this run.`);
+          classificationUnavailable = true;
+        }
+      }
+
+      for (let j = 0; j < chunk.length; j++) {
+        const post = chunk[j];
+        const result = results ? results[j] : null; // null = unclassified -> fail open
+
+        if (result && result.isJobProvider === false) {
+          for (const entry of post.entries) {
+            await logger.append("INFO", `Skipped a job-seeker/non-employer post for role '${entry.roleToAssign}': ${result.reasoning || "reads like the author is looking for work, not offering it"}`);
+          }
+          continue; // never reaches finalizeAndInsertGroup — reject before spending anything, same convention as the looksLikeJobPost gate above
+        }
+
+        const description = result && result.isJobProvider ? result.description : null;
+        for (const entry of post.entries) {
+          await finalizeAndInsertGroup(entry, description);
         }
       }
     }
@@ -413,7 +529,7 @@ async function processJobLogic(job, logger, mappings, aiEnabled, aiCredits, aiTe
     if (initialPhones.length > 0) initialDetails += ` [Phones: ${initialPhones.join(", ")}]`;
     await logger.append("SUCCESS", `Initial Page Found: ${initialEmails.length} emails, ${initialPhones.length} phones${initialDetails}`);
 
-    await saveContacts(initialGroups, currentRole, currentKeyword, currentRoleDef);
+    await collectContacts(initialGroups, currentRole, currentKeyword, currentRoleDef);
 
     // Extract Pagination info
     let raw = rawText.replace(/\\+"/g, '"').replace(/&quot;/g, '"');
@@ -517,7 +633,7 @@ async function processJobLogic(job, logger, mappings, aiEnabled, aiCredits, aiTe
           if (paginatedPhones.length > 0) paginatedDetails += ` [Phones: ${paginatedPhones.join(", ")}]`;
           await logger.append("SUCCESS", `Page ${page} Found: ${paginatedEmails.length} emails, ${paginatedPhones.length} phones${paginatedDetails}`);
 
-          await saveContacts(paginatedGroups, currentRole, currentKeyword, currentRoleDef);
+          await collectContacts(paginatedGroups, currentRole, currentKeyword, currentRoleDef);
 
         } catch (err) {
           const errorDetails = err.response ? `HTTP ${err.response.status}` : err.message;
@@ -529,6 +645,8 @@ async function processJobLogic(job, logger, mappings, aiEnabled, aiCredits, aiTe
       }
     }
   }
+
+  await finalizeClassifiedContacts();
 
   if (totalInserted === 0) {
     await logger.append("WARN", "No new records to insert.");

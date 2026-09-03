@@ -304,13 +304,13 @@ export async function parseResumeText(resumeText: string, temperature?: number, 
   };
 }
 
-// Job-post summary (2026-09-02) — backs the Emails detail panel's "The job" section. Replaces a plain-code
-// truncation of the raw scraped post (which still read as raw scraped text, not a real summary) with an
-// actual AI-written one. Generated on-demand (see app/api/summarize-post/route.ts), not at scrape time —
-// the backend's match-scoring pipeline deliberately runs a free algorithm first and only calls Gemini when
-// it can't resolve confidently, so there's no reliable per-post AI call already happening to piggyback
-// this onto; summarizing every scraped post regardless of whether anyone looks at it would be a new,
-// unconditional cost working against that same cost-minimization design.
+// Job-post summary (2026-09-02) — backs the Emails detail panel's "The job" section. As of 2026-09-03 this
+// is the BACKLOG/FAIL-OPEN BRIDGE only (see app/api/summarize-post/route.ts's header comment): the
+// backend's own batched classifyJobPosts() (backend/src/services/ai.service.js) now writes a description
+// directly at scrape time for every newly scraped post, reusing the same read that already decided it's a
+// real job posting — no unconditional per-post-per-view Gemini call any more. This on-demand path only
+// still runs for rows the backend didn't classify (pre-feature backlog, or a run where AI classification
+// was unavailable) — kept deliberately narrow, not the primary generation path.
 const JOB_POST_SUMMARY_SYSTEM_PROMPT = `You write a short, plain-language summary of a job posting for a job candidate. Your only output is a single JSON object — no markdown, no commentary.
 
 You will be given the raw scraped text of a job post (it may include line-break artifacts, irrelevant boilerplate, or be cut off mid-sentence). Summarize only what the job post actually is — the role, what the company is looking for, and any standout requirement or benefit it clearly states. 2-3 sentences.

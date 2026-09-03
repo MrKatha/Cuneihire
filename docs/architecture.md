@@ -2271,4 +2271,87 @@ confirmed 0 contaminated rows remain in either table afterward, including the sp
 operator's screenshot. `ai_summary` was untouched by this (already null everywhere at the time — no stale
 AI-generated text needed cleanup, just the raw scraped text it will read from on next generation).
 
+## Reply indicators became dead ends — fixed (2026-09-03)
+Operator: "the reply buttons are still not working... not taking me to the reply section." The new-reply
+toast's click-to-navigate (shipped 2026-09-02) worked fine, but it was never the thing being clicked — two
+OTHER reply surfaces existed with no navigation at all: the "↩ Replied" badge on an Emails-tab row
+(`JamsTab.tsx`, a plain `<span>`) and each reply card inside `EmailDetailPanel.tsx`'s own "Replies" section
+(plain `<div>`s, no `onClick`). Both now go through the same `pendingReplyFocus` deep-link mechanism the
+toast already uses, via a new `onViewReply?: (replyId: string) => void` callback threaded
+`page.tsx` → `JamsHub.tsx` → `JamsTab.tsx` → `EmailDetailPanel.tsx`. The badge (now a `<button>`, still
+styled `.badge.ok`) resolves "which reply" by taking the most recent reply for that recipient
+(`repliesFor(r)`, sorted desc); a reply card inside the detail panel already knows its own `rep.id` directly.
+Both call `onViewReply(replyId)` → `setPendingReplyFocus(replyId)` at the page.tsx level (no `handleTabChange`
+needed from the Emails tab — it's already the active top-level tab) — `JamsHub`'s existing
+`effectiveSubTab = pendingReplyFocus ? "responses" : subTab` derivation does the rest, unmounting `JamsTab`
+(closing its `EmailDetailPanel`) and mounting `ResponsesTab` open to that exact reply, with no extra
+`onClose` call needed. Lint clean at the existing 137-problem baseline. Deployed (frontend-only, no backend
+change), confirmed via `gh api .../commits/ab77062/status`.
+
+## AI job-provider classification gate (2026-09-03) — stops emailing job-seekers as if they were employers
+Operator: "I have noticed that you again sent a mail to the person who is basically searching for a job, not
+providing the job... a person finding a job and a person providing a job use almost the same keywords."
+Root cause: the only "is this even a job post" gate, `looksLikeJobPost()`
+(`matchAlgorithm.service.js:325-340`, 2026-08-31), was built to catch promo/ad spam — its `HIRING_SIGNAL_RE`
+(`looking for an? ... engineer`, `we're looking for`, `seeking an?`) is phrasing a job-**seeker's** own post
+trips just as easily as a real employer's, and it was never checking authorship, only "does this read like a
+hiring post at all." A job-seeker post sailed through as `job_or_unknown` — a genuine, confirmed gap, not a
+duplicate of anything.
+
+**Fix — two-pass, batched AI classification**, inserted into `scraper.worker.js`'s pipeline, gated by the
+platform's shared **20-Gemini-requests/day free-tier ceiling** (the dominant constraint — see "Free-tier
+daily quota" above; a naive per-post design could exhaust the whole platform's AI budget from job-filtering
+alone in a single scrape run). `saveContacts` split into three closures inside `processJobLogic`:
+- **`collectContacts`** — unchanged dedup + `looksLikeJobPost` (both stay free/first), but a survivor is now
+  queued (`classificationQueue`) instead of proceeding straight to `getJobPost`. `allEmails`/`allPhones` are
+  now claimed at *collection* time, not insert time (deferring classification meant two groups for the same
+  new contact, found via different keywords/pages before either was classified, could otherwise both reach
+  the insert step — no DB unique constraint on email backs that up).
+- **`finalizeClassifiedContacts`** — runs ONCE, after the entire `for (const mapping of mappings)` loop
+  finishes (every keyword, every page) — not per keyword, not per page. Dedups the queue to *distinct posts*
+  by `source_url`, batches them **20 per Gemini call** (`CLASSIFY_BATCH_SIZE`) via the new
+  `classifyJobPosts()` (`ai.service.js`, same `callAiJson` pattern as `scoreJobMatch`), spending exactly
+  **1 `ai_credit` per batch call, not per post**. Realistic single-run volume is well under 20, so this
+  typically costs **1 extra Gemini call per scrape run**. A post classified `isJobProvider: false` is
+  skipped before any DB write, credit spend, or send — same "reject before spending anything" convention as
+  `looksLikeJobPost`. **Fails open** on any unavailability (AI disabled, credits exhausted, call throws,
+  malformed response) — affected posts proceed unclassified, exactly as if this feature didn't exist, rather
+  than holding back every contact platform-wide whenever the shared quota happens to already be spent.
+- **`finalizeAndInsertGroup`** — the original `getJobPost` → scoring → strictness → insert logic, unchanged,
+  now a function called once per classification survivor.
+
+**The classifier doubles as the description generator** — the operator's separate ask, "keep the context
+short... don't generate descriptions right there... AI-based assembly just provides the filtered job caption
+as a job description... show it in a formatted way." The SAME batched read that decides `isJobProvider` also
+returns a clean, plain-text `description` (real line breaks, facts only, LinkedIn boilerplate stripped) —
+no second summarization call. Written straight into `automailsend_recipients.ai_summary`/
+`ai_summary_generated_at` at insert time (reusing the columns from the 2026-09-02 on-demand-summary feature,
+no new migration) — every recipient inserted for the same post in the same run shares one description, a
+strict improvement over the old on-demand design's documented "no propagation to sibling rows" limitation.
+
+**The 2026-09-02 on-demand `/api/summarize-post` route is kept, reframed as the backlog/fail-open bridge**
+(not deleted) — it's still the only mechanism that fills `ai_summary` for recipients scraped before this
+feature existed, or saved during a fail-open (quota-exhausted) window. Its own trigger condition already
+bounds it correctly; only its header comments changed to describe the new role.
+`EmailDetailPanel.tsx`'s plain-text fallback `summarizePost()` now preserves real line/paragraph breaks
+(only collapses runs of spaces/tabs, not newlines) instead of flattening the whole post to one line, paired
+with `whiteSpace: "pre-wrap"` wherever a description renders — same "always show it in a formatted way" ask.
+
+**`jobspy.worker.js`** (JobSpy/Indeed source) has the identical `looksLikeJobPost`-only gap but is
+dev/staging-only, not customer-facing — deliberately **not** mirrored this pass (real risk/effort in the
+highest-risk, zero-test part of the codebase, for no current user-facing benefit); left a trip-wire comment
+at its `looksLikeJobPost` call site instead, to catch before `jobspy_sourcing_enabled` ever goes live.
+
+**Verified**: hand-called `classifyJobPosts` directly against two synthetic captions before deploying — a
+job-seeker post modeled on the operator's exact reported scenario ("I'm a software engineer... looking for a
+new role... #opentowork") correctly returned `isJobProvider: false`; a genuine "We're hiring a Backend
+Engineer at Acme Corp..." post correctly returned `isJobProvider: true` with a clean 4-line formatted
+description (role/work mode/requirements/how to apply) — confirming both the classification judgment and
+the description-formatting instruction work as designed, in one real (quota-spending) Gemini call.
+
+**Files touched**: `backend/src/services/ai.service.js` (new `classifyJobPosts`), `backend/src/workers/
+scraper.worker.js` (the collect/classify/finalize split), `backend/src/workers/jobspy.worker.js`
+(trip-wire comment only), `frontend/src/components/EmailDetailPanel.tsx` (fallback formatting +
+comment), `frontend/src/app/api/summarize-post/route.ts` + `frontend/src/lib/aiClient.ts` (comments only).
+
 **Files touched**: `backend/src/services/extraction.service.js` only. No schema change.

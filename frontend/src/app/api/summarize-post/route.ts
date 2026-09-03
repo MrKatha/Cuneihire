@@ -4,9 +4,15 @@ import { checkAiGate, getAuthedUserId, spendAiCredit, summarizeJobPost } from "@
 
 export const runtime = "nodejs";
 
-// Backs EmailDetailPanel.tsx's "The job" section (2026-09-02) — generates an AI summary of a recipient's
-// scraped job post on-demand, the first time its detail panel is opened, and caches the result on that
-// recipient row so every later open is a free read, not a repeat Gemini call. See docs/architecture.md.
+// Backs EmailDetailPanel.tsx's "The job" section (2026-09-02). As of 2026-09-03 this is the BACKLOG/
+// FAIL-OPEN BRIDGE, not the primary path — the backend's own batched classifyJobPosts() call
+// (backend/src/services/ai.service.js) now writes ai_summary directly at scrape time for every newly
+// scraped recipient (scraper.worker.js's finalizeAndInsertGroup), reusing the same read that already
+// decided the post is a real job posting, so no separate Gemini call is needed at view time any more. This
+// route only still fires for the rows that AI didn't reach at scrape time: recipients scraped before this
+// feature existed, or ones saved while AI classification was unavailable that run (credits/quota
+// exhausted) — see docs/architecture.md. Result still caches on the recipient row so a later open is a
+// free read, not a repeat Gemini call.
 export async function POST(request: NextRequest) {
   try {
     const userId = await getAuthedUserId(request);
