@@ -49,6 +49,28 @@ function sentKey(email: string, role: Role) {
   return `${email.toLowerCase()}::${role}`;
 }
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+// "Applied to" filter (2026-09-03, operator ask — "filters to search for the job that I have applied to
+// today or in a week or in a month"). Filters on lastSentAt (the most recent send to this contact) — this
+// tool's "applying" is sending the outreach email, there's no separate application step. "today" is a
+// calendar-day boundary (midnight `now`, not a rolling 24h); "week"/"month" are rolling 7/30-day windows —
+// simpler than calendar week/month and matches how a candidate actually thinks about "recently."
+function isWithinDateRange(dateStr: string | undefined, range: string, now: number): boolean {
+  if (range === "all") return true;
+  if (!dateStr) return false;
+  const t = new Date(dateStr).getTime();
+  if (Number.isNaN(t)) return false;
+  if (range === "today") {
+    const startOfToday = new Date(now);
+    startOfToday.setHours(0, 0, 0, 0);
+    return t >= startOfToday.getTime();
+  }
+  if (range === "week") return now - t <= 7 * DAY_MS;
+  if (range === "month") return now - t <= 30 * DAY_MS;
+  return true;
+}
+
 // The unified lifecycle hub — every contact found (scraped or manual), with matching context, sending
 // actions, and each contact's own send history all in one place. Absorbs what used to be four separate
 // tabs (Scraper & Contacts, Sending & Automail, Quick Send, Logs) — see docs/architecture.md. "Does this
@@ -81,7 +103,12 @@ export function JamsTab({
   const [filterStatus, setFilterStatus] = useState("all");
   const [filterSource, setFilterSource] = useState("all");
   const [filterRole, setFilterRole] = useState("all");
+  const [filterDateRange, setFilterDateRange] = useState("all");
   const [searchQuery, setSearchQuery] = useState("");
+  // Computed once per mount via a lazy useState initializer, not called inline during render/useMemo (React
+  // Compiler purity rule flags a bare Date.now() in either place — same pattern as EmailDetailPanel.tsx's
+  // `now`). Only needs to be "roughly now" for a day/week/month filter, not live-ticking.
+  const [now] = useState(() => Date.now());
   // Real pagination (2026-09-01, operator ask — "only 15 emails should be visible on one page"),
   // replacing the old infinite-scroll IntersectionObserver. `page` is clamped against the current
   // filtered set below (see `currentPage`), so narrowing a filter can never strand you on a now-empty
@@ -171,13 +198,14 @@ export function JamsTab({
       if (filterStatus !== "all" && (r.status || "pending") !== filterStatus) return false;
       if (filterSource !== "all" && (r.source || "auto_fetch") !== filterSource) return false;
       if (filterRole !== "all" && r.role !== filterRole) return false;
+      if (!isWithinDateRange(r.lastSentAt, filterDateRange, now)) return false;
       if (searchQuery) {
         const q = searchQuery.toLowerCase();
         if (![r.email, r.title].some((v) => (v || "").toLowerCase().includes(q))) return false;
       }
       return true;
     });
-  }, [recipients, filterStatus, filterSource, filterRole, searchQuery]);
+  }, [recipients, filterStatus, filterSource, filterRole, filterDateRange, now, searchQuery]);
 
   // No explicit "reset to page 1 on filter change" effect here (that pattern needs either a useEffect,
   // which this repo's React Compiler lint config flags as a cascading-render risk, or a ref read/write
@@ -392,6 +420,15 @@ export function JamsTab({
             <select value={filterRole} onChange={(e) => setFilterRole(e.target.value)}>
               <option value="all">All roles</option>
               {roleDefs.map((d) => <option key={d.key} value={d.key}>{d.label}</option>)}
+            </select>
+          </label>
+          <label className="field">
+            <span>Applied</span>
+            <select value={filterDateRange} onChange={(e) => setFilterDateRange(e.target.value)}>
+              <option value="all">Any time</option>
+              <option value="today">Today</option>
+              <option value="week">Past week</option>
+              <option value="month">Past month</option>
             </select>
           </label>
           <label className="field">
