@@ -190,23 +190,21 @@ function startScheduler() {
     }
   }, tickSec * 1000);
 
-  // Open-source job sourcing via JobSpy/Indeed (2026-08-31) — 6th independent loop, own opt-in flag
-  // (jobspy_sourcing_enabled, separate from auto_fetch_enabled — additive to the LinkedIn scraper above,
-  // not a replacement for it), own local queued-throttle map so the two loops' per-user timing never
-  // interferes. A much longer default interval than LinkedIn's (60min vs. a 180min *floor* but often-tighter
-  // real usage) — Indeed's own listings don't change minute-to-minute the way a LinkedIn feed does, and
-  // being a good citizen against Indeed's own rate limits matters since JobSpy has no official API contract
-  // with them. See docs/architecture.md's "Open-source job sourcing" section.
+  // Open-source job sourcing via JobSpy/Indeed (2026-08-31) — 6th independent loop, its own local
+  // queued-throttle map so the two loops' per-user timing never interferes. A much longer default interval
+  // than LinkedIn's (60min vs. a 180min *floor* but often-tighter real usage) — Indeed's own listings don't
+  // change minute-to-minute the way a LinkedIn feed does, and being a good citizen against Indeed's own rate
+  // limits matters since JobSpy has no official API contract with them. See docs/architecture.md's
+  // "Open-source job sourcing" section.
   //
-  // Operator decision (2026-08-31): this stays dev/staging-only until further notice, full stop — not just
-  // "off by default." The per-user `jobspy_sourcing_enabled` DB toggle alone isn't a real environment
-  // boundary (it's the exact same deployed code reading the exact same kind of column in every environment,
-  // and a production user could flip it themselves from Settings) — so this loop doesn't even start unless
-  // JOBSPY_SOURCING_ENABLED_GLOBALLY=true is set in this process's own env. Only the staging deploy workflow
-  // sets that; production's .env deliberately never does, so this is a hard code-level boundary, not a
-  // per-row default that a user or a future admin action could quietly cross.
+  // 2026-09-03: promoted from an opt-in per-user toggle (with a Settings UI switch) to an always-on backend
+  // detail — `jobspy_sourcing_enabled` now defaults true and every existing row is backfilled (see
+  // supabase_setup.sql); there's no frontend control for it any more, by operator decision ("the user does
+  // not need to know what is happening in the backend"). This env var remains the one real kill switch —
+  // now set true in production too (flipped live 2026-09-03, verified via `pm2 logs` showing this loop
+  // start) — kept as a code-level boundary in case a fast rollback is ever needed, not as a staging-only gate.
   if (process.env.JOBSPY_SOURCING_ENABLED_GLOBALLY !== "true") {
-    console.log(pc.dim("[Scheduler] JobSpy/Indeed worker not started — dev/staging-only feature, JOBSPY_SOURCING_ENABLED_GLOBALLY is not set in this environment."));
+    console.log(pc.dim("[Scheduler] JobSpy/Indeed worker not started — JOBSPY_SOURCING_ENABLED_GLOBALLY is not set in this environment."));
     return;
   }
   const jobspyTickSec = process.env.JOBSPY_SCHEDULER_INTERVAL_SEC ? parseInt(process.env.JOBSPY_SCHEDULER_INTERVAL_SEC, 10) : 60;

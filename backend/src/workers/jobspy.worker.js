@@ -28,7 +28,8 @@ const { spendAiCredit } = require("../lib/aiCredits");
 // AI job-provider classification (2026-09-03) — mirrors scraper.worker.js's collectContacts/
 // finalizeAndInsertGroup/finalizeClassifiedContacts split (this file's own trip-wire comment, added the
 // same day the LinkedIn side gained this gate, said to do exactly this before jobspy_sourcing_enabled ever
-// goes live for real users). Indeed listings are structured job postings, not free-text social posts, so
+// went live for real users — it now has, per-user opt-in removed, backend-default-on for everyone). Indeed
+// listings are structured job postings, not free-text social posts, so
 // the "is the author actually offering a job" ambiguity this gate exists for is inherently smaller here
 // than on LinkedIn — but it's not zero (a listing site can still surface a candidate's own "hire me" post),
 // so this stays symmetric with the LinkedIn pipeline rather than assuming it away.

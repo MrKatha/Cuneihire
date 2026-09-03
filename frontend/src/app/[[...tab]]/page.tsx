@@ -205,7 +205,6 @@ export default function Home() {
   const [maxFollowUps, setMaxFollowUps] = useState(defaultState().maxFollowUps);
   const [aiEmailWritingEnabled, setAiEmailWritingEnabled] = useState(defaultState().aiEmailWritingEnabled);
   const [replyMonitoringEnabled, setReplyMonitoringEnabled] = useState(defaultState().replyMonitoringEnabled);
-  const [jobspySourcingEnabled, setJobspySourcingEnabled] = useState(defaultState().jobspySourcingEnabled);
   // Automation's daily-limit ceiling, shown on JAMS's Overview sub-tab (2026-08-25) — admin-configurable,
   // one global number for now (no billing/plan system yet). Public route, no auth needed, same as
   // allow_signups on the signup page.
@@ -356,7 +355,6 @@ export default function Home() {
       setMaxFollowUps(saved.maxFollowUps);
       setAiEmailWritingEnabled(saved.aiEmailWritingEnabled);
       setReplyMonitoringEnabled(saved.replyMonitoringEnabled);
-      setJobspySourcingEnabled(saved.jobspySourcingEnabled);
       setRoleDefs(saved.roleDefs);
       setSmtpAccounts(saved.smtpAccounts);
       setSending(saved.batchSendPending);
@@ -623,7 +621,6 @@ export default function Home() {
         maxFollowUps, // not saved in app_state — webhook/admin-granted, read-only from here
         aiEmailWritingEnabled, // not saved in app_state — webhook/admin-granted, read-only from here
         replyMonitoringEnabled, // not saved in app_state — webhook/admin-granted, read-only from here
-        jobspySourcingEnabled,
         profile,
         batchSendPending: sending,
       }).then(() => {
@@ -634,7 +631,7 @@ export default function Home() {
     return () => {
       if (saveTimer.current) clearTimeout(saveTimer.current);
     };
-  }, [hydrated, userId, config, delaySec, activeTemplateRole, defaultTitle, autoFetch, automail, ai, recipients, sentLog, jobspySourcingEnabled]);
+  }, [hydrated, userId, config, delaySec, activeTemplateRole, defaultTitle, autoFetch, automail, ai, recipients, sentLog]);
 
   // Debounced auto-save for the candidate profile (2026-08-19) — its own table/save path now, separate
   // from the app_state round trip above (see storage.ts's saveCandidateProfile).
@@ -1180,8 +1177,6 @@ export default function Home() {
               currentPeriodEndsAt={currentPeriodEndsAt}
               aiEmailWritingEnabled={aiEmailWritingEnabled}
               maxFollowUps={maxFollowUps}
-              jobspySourcingEnabled={jobspySourcingEnabled}
-              onJobspySourcingChange={setJobspySourcingEnabled}
             />
           )}
 

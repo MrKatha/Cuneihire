@@ -66,10 +66,6 @@ export type PersistedState = {
   maxFollowUps: number;
   aiEmailWritingEnabled: boolean;
   replyMonitoringEnabled: boolean;
-  // Open-source job sourcing via JobSpy/Indeed (2026-08-31) — opt-in, additive to autoFetch (the LinkedIn
-  // scraper) above, not a replacement. Reuses each role's existing keywords/preferredLocations, no separate
-  // config surface. See docs/architecture.md's "Open-source job sourcing" section.
-  jobspySourcingEnabled: boolean;
   profile: CandidateProfile;
   batchSendPending: boolean;
 };
@@ -118,7 +114,6 @@ export function defaultState(): PersistedState {
     maxFollowUps: 3,
     aiEmailWritingEnabled: true,
     replyMonitoringEnabled: true,
-    jobspySourcingEnabled: false,
     // Loaded/saved separately via loadCandidateProfile/saveCandidateProfile (its own table, own section
     // below) — not part of the app_state round trip any more. Kept here only as the field's shape default.
     profile: emptyCandidateProfile(),
@@ -219,7 +214,8 @@ export async function loadState(userId: string): Promise<PersistedState> {
     state.maxFollowUps = appState.max_follow_ups ?? 3;
     state.aiEmailWritingEnabled = appState.ai_email_writing_enabled !== false;
     state.replyMonitoringEnabled = appState.reply_monitoring_enabled !== false;
-    state.jobspySourcingEnabled = appState.jobspy_sourcing_enabled || false;
+    // jobspy_sourcing_enabled is intentionally not read here any more (2026-09-03) — it's a backend-only
+    // implementation detail now (always-on, see supabase_setup.sql), not a frontend-visible setting.
     // profile is no longer read from app_state — see loadCandidateProfile below. The old candidate_*
     // columns here are left in place, unused, same precedent as every other superseded column this
     // project (delay_sec / old ai_prompt / app_state.config — see supabase_setup.sql section 27).
@@ -614,7 +610,8 @@ export async function saveAppState(userId: string, state: PersistedState) {
       active_template_role: state.activeTemplateRole,
       default_title: state.defaultTitle,
       auto_fetch_enabled: state.autoFetch.enabled,
-      jobspy_sourcing_enabled: state.jobspySourcingEnabled,
+      // jobspy_sourcing_enabled intentionally omitted (2026-09-03) — backend-only implementation detail
+      // now, always-on by DB default; the frontend must never overwrite it back to false on save.
       auto_fetch_interval_min: state.autoFetch.intervalMin,
       auto_fetch_pagination_limit: state.autoFetch.paginationLimit,
       auto_fetch_pagination_delay_sec: state.autoFetch.paginationDelaySec,

@@ -996,10 +996,21 @@ create index if not exists idx_automailsend_app_state_ls_subscription
 
 -- Open-source job sourcing via JobSpy (2026-08-31, v1 scoped to Indeed only — see docs/architecture.md).
 -- Purely additive: the existing LinkedIn-cookie scraper (auto_fetch_enabled) is completely untouched: this
--- is a second, independent, opt-in ingestion path feeding the exact same automailsend_job_posts/
--- automailsend_recipients pipeline (looksLikeJobPost -> match scoring -> send), not a replacement.
+-- is a second, independent ingestion path feeding the exact same automailsend_job_posts/
+-- automailsend_recipients pipeline (looksLikeJobPost -> AI classification -> match scoring -> send), not a
+-- replacement.
+--
+-- 2026-09-03: promoted from an opt-in toggle to an always-on backend implementation detail, per operator
+-- decision — "the user does not need to know what's happening in the backend, they'll just see the jobs
+-- that have been scraped." No frontend control exists for this column any more (the Settings toggle was
+-- removed); default flips to true and every existing row is backfilled so it's on for the whole (tiny,
+-- pre-launch) user base. JOBSPY_SOURCING_ENABLED_GLOBALLY (backend/src/scheduler.js) remains the one real
+-- kill switch — now flipped on in production, scoped by nothing else any more.
 alter table public.automailsend_app_state
-  add column if not exists jobspy_sourcing_enabled boolean not null default false;
+  add column if not exists jobspy_sourcing_enabled boolean not null default true;
+alter table public.automailsend_app_state
+  alter column jobspy_sourcing_enabled set default true;
+update public.automailsend_app_state set jobspy_sourcing_enabled = true where jobspy_sourcing_enabled = false;
 
 -- Which pipeline actually produced a given job post — admin/JAMS visibility only, not used for any
 -- dedup/eligibility logic (source_url's own uniqueness already handles that, and LinkedIn/Indeed URLs can

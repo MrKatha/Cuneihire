@@ -2393,9 +2393,55 @@ Confirmed clean after both fixes: real Indeed listings → 7 distinct candidates
 call (1 AI credit, not 7) → match-scoring → 2 genuine, valid contacts inserted (`jaya@bvteck.com`,
 `humana@myworkday.com`). The bogus `"w"` row from the pre-fix run was deleted from the database.
 
-**Deliberately not flipped live.** `JOBSPY_SOURCING_ENABLED_GLOBALLY` is untouched in production — that's
-the operator's own 2026-08-31 decision, described in their own words as "a real code-level boundary, not
-just a per-row default that a user or a future admin action could quietly cross." Left for an explicit
-go-ahead once real results could be shown, not bundled into the general "get started" authorization.
+**Deliberately not flipped live** *(superseded same day — see the follow-up section below).* `JOBSPY_SOURCING_ENABLED_GLOBALLY`
+was left untouched in production — that's the operator's own 2026-08-31 decision, described in their own
+words as "a real code-level boundary, not just a per-row default that a user or a future admin action could
+quietly cross." Left for an explicit go-ahead once real results could be shown, not bundled into the general
+"get started" authorization.
 
 **Files touched**: `backend/src/workers/jobspy.worker.js` only. No schema change, no new exports elsewhere.
+
+### JobSpy/Indeed: flipped live in production + opt-in toggle removed entirely (2026-09-03, same-day follow-up)
+
+Operator, after seeing the test results above: **"you have my AWS access. You can do whatever you have to do
+by yourself."** Also, on the toggle: "the user does not need to know about what is happening in the backend.
+They will just see the jobs that have been scraped by the JobsPy. Remove the toggle, make the Indeed
+scraping and the jobsPy scraping default."
+
+**Production activation.** SSHed into the droplet (`~/.claude/secrets/keys/cuneihire-backend-aws.pem` →
+`ubuntu@54.254.169.26`), appended `JOBSPY_SOURCING_ENABLED_GLOBALLY=true` to
+`/srv/ismail_data/auto_apply_linkedin/backend/.env`, `pm2 restart auto_apply_linkedin_backend --update-env`.
+Confirmed via `pm2 logs` that the scheduler's startup line changed from "JobSpy/Indeed worker not started"
+to `🚀 Starting JobSpy/Indeed Worker (checking every 60 seconds, 60min between runs per user)...` — the loop
+is genuinely running in production now.
+
+**Opt-in toggle removed.** The per-user `jobspy_sourcing_enabled` flag stops being a user-facing setting at
+all. Removed: the SettingsTab.tsx toggle UI (it was already invisible in production — gated behind
+`NEXT_PUBLIC_JOBSPY_SOURCING_AVAILABLE`, never set outside Vercel Preview — so this is a pure cleanup, no
+production user ever saw it disappear) and every piece of its frontend plumbing (`page.tsx` state + debounced
+save, `storage.ts` load/save, the `Props` field on `SettingsTab`). The DB column's default flipped
+`false`→`true` in both `supabase_setup.sql` copies (`alter column ... set default true`), and every existing
+row was backfilled to `true` live — checked first that this was a 3-total-row, pre-launch-scale platform (1
+of 3 with `auto_fetch_enabled`, i.e. one genuinely active account) before backfilling, since flipping this
+for an established paying user base sight-unseen would have been a different risk calculus entirely.
+`storage.ts`'s save call no longer includes `jobspy_sourcing_enabled` in its upsert object at all — dropping
+the key (not sending `false`) means a client save can never stomp the column back off.
+
+`JOBSPY_SOURCING_ENABLED_GLOBALLY` is the one lever left — kept specifically as a fast, code-level rollback
+switch (flip it back to unset and the whole loop stops for everyone at once), not as a staged per-user
+rollout mechanism any more, since there's no longer a per-user flag to stage with.
+
+**Platform scope, explicitly held at Indeed-only.** Asked whether to widen beyond Indeed (`python-jobspy`'s
+installed `Site` enum confirms 8 supported sites: linkedin, indeed, zip_recruiter, glassdoor, google, bayt,
+naukri, bdjobs) — operator: keep LinkedIn as the existing cookie-scraper does today, no new JobSpy sites for
+now, "just for far far in the future," possibly bundled with other planned features later. `jobspy_scrape.py`
+still hardcodes `site_name=["indeed"]`; that stays as-is until explicitly revisited.
+
+**Noted, not implemented — pricing/package structure.** Operator raised replacing the Pro tier's "50
+jobs/day" promise with "up to 1,000 jobs/month" instead — reasoning: the same 50 distinct jobs for one role
+genuinely can't be found fresh every single day, so a monthly ceiling is the honest promise; a user-set daily
+cap (if any) still applies underneath it, otherwise the scraper just sends as many as it finds up to the
+monthly total. Explicitly deferred by the operator ("we will change the package system later... first
+priority is to make the Indeed work") — not touched this pass. Revisit in `docs/pricing-tiers.md` when the
+package-structure phase starts; the $18/mo-ish cost-to-serve estimate there also still needs the
+AI-classification-cost refresh noted in the pricing-tiers doc itself.

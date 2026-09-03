@@ -36,8 +36,9 @@ jobs:
             # Best-effort, never fails the deploy -- see docs/architecture.md's "Open-source job sourcing"
             # section. jobspy.worker.js's own JobSpy-search calls will error with a clear message (surfaced
             # in that user's execution log) until this succeeds, but the rest of the app is unaffected
-            # either way -- jobspy_sourcing_enabled defaults to false, so nothing calls this until an
-            # account opts in. python3 exists on this server by default but python3-pip does not (confirmed
+            # either way -- gated by JOBSPY_SOURCING_ENABLED_GLOBALLY (set true in production 2026-09-03;
+            # jobspy_sourcing_enabled itself now defaults true for every account, no per-user opt-in any
+            # more). python3 exists on this server by default but python3-pip does not (confirmed
             # live, 2026-08-31: "No module named pip") -- install it first, also best-effort. This Ubuntu
             # version also enforces PEP 668 (externally-managed-environment) by default, which blocks a
             # plain `pip install` outside a venv (confirmed live, same deploy) -- --break-system-packages

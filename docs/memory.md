@@ -2,7 +2,29 @@
 
 Newest on top. Terse bullets only — done / in-progress / locked decisions / open items. Update every phase.
 
-- **2026-09-03 — DONE (code), OPEN (production activation): JobSpy/Indeed classification gate mirrored +
+- **2026-09-03 (later) — DONE: JobSpy/Indeed flipped live in production; opt-in toggle removed entirely,
+  now always-on.** Operator: "you have my AWS access. You can do whatever you have to do by yourself" +
+  "the user does not need to know about what is happening in the backend... Remove the toggle, make the
+  Indeed scraping and the jobsPy scraping default." Supersedes the "Deliberately NOT flipped live" entry
+  right below.
+  - Flipped `JOBSPY_SOURCING_ENABLED_GLOBALLY=true` on production's `.env` via SSH
+    (`~/.claude/secrets/keys/cuneihire-backend-aws.pem` → `ubuntu@54.254.169.26`), `pm2 restart --update-env`.
+    Confirmed live via `pm2 logs`: "🚀 Starting JobSpy/Indeed Worker" now fires on the real server.
+  - Removed the per-user `jobspy_sourcing_enabled` toggle model completely — deleted SettingsTab.tsx's UI
+    (was already invisible in prod, gated behind an unset `NEXT_PUBLIC_JOBSPY_SOURCING_AVAILABLE`) and all
+    its frontend plumbing (page.tsx state/save, storage.ts load/save). Column default flipped `false`→`true`
+    in both `supabase_setup.sql` copies; live DB backfilled to `true` for all 3 existing app_state rows —
+    checked first this was pre-launch scale (1 of 3 actually has `auto_fetch_enabled`) before backfilling.
+    `JOBSPY_SOURCING_ENABLED_GLOBALLY` stays as the one fast rollback lever, no longer a staged-rollout gate.
+  - Platforms: confirmed `python-jobspy` supports 8 sites total (linkedin, indeed, zip_recruiter, glassdoor,
+    google, bayt, naukri, bdjobs — read straight off the installed package's `Site` enum). Operator: stay
+    Indeed-only for now, more sites are "far far in the future." `jobspy_scrape.py` unchanged
+    (`site_name=["indeed"]`).
+  - **Noted, NOT implemented** (operator: "we will change the package system later... first priority is to
+    make the Indeed work"): replace Pro's "50 jobs/day" promise with "up to 1,000 jobs/month" — a user-set
+    daily cap still applies underneath if one exists, otherwise the scraper just sends up to the monthly
+    total. Revisit in `docs/pricing-tiers.md` when the package-structure phase starts.
+- **2026-09-03 — DONE (code), OPEN (production activation) — SUPERSEDED, see entry above.** JobSpy/Indeed classification gate mirrored +
   end-to-end tested for real.** Operator: "let's get started with the jobspy... we will delay product, no
   worries." Confirmed via real deploy logs the Python bridge (`python-jobspy`) is already installed and
   working on the production droplet — the gap was never infra, it was the code + never having been run

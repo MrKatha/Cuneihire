@@ -124,6 +124,16 @@ AI-written-email gate (match-scoring AI stays available on every tier — this o
 email itself), the follow-up count cap, and reply monitoring. All four are now for-real enforced — see
 docs/architecture.md's "Tier-gated feature limits" section for exactly which worker/UI checks which flag.
 
+**Flagged, not yet decided (2026-09-03, operator):** the *daily* send cap as a headline promise may not be
+honest at real-world scale — the same N distinct openings for one role genuinely won't exist fresh every
+single day, so a daily-cap framing risks reading as a promise the scraper structurally can't keep. Operator's
+proposed replacement: reframe as a **monthly** ceiling instead (their example: "up to 1,000 jobs/month" for
+Pro) — a user-set daily cap still applies underneath if the user wants one, otherwise the scraper just sends
+up to the monthly total, capped by whatever volume it actually finds. Explicitly deferred — "we will change
+the package system later... first priority is to make the Indeed work." Revisit this alongside the
+cost-to-serve refresh below (JobSpy/Indeed's AI classification calls aren't reflected in the $10/$18/$30
+estimates yet either) when the package-structure phase starts.
+
 **One open implementation question this surfaces, not blocking the numbers above**: every signup still
 defaults `plan_tier` to `'free'` (`supabase_setup.sql`), and nothing currently forces a subscription choice
 before the app is usable. With no $0 product any more, `'free'` needs to become either a time-boxed trial
