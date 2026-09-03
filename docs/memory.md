@@ -2,6 +2,28 @@
 
 Newest on top. Terse bullets only — done / in-progress / locked decisions / open items. Update every phase.
 
+- **2026-09-03 — DONE (code), OPEN (production activation): JobSpy/Indeed classification gate mirrored +
+  end-to-end tested for real.** Operator: "let's get started with the jobspy... we will delay product, no
+  worries." Confirmed via real deploy logs the Python bridge (`python-jobspy`) is already installed and
+  working on the production droplet — the gap was never infra, it was the code + never having been run
+  end-to-end. Mirrored the LinkedIn scraper's collect→batch-classify→finalize split into
+  `jobspy.worker.js` (its own 2026-09-03 trip-wire comment said to do exactly this before
+  `jobspy_sourcing_enabled` ever goes live). Real end-to-end test (bypassing only the scheduler's timing,
+  not the per-user `jobspy_sourcing_enabled` flag — same convention as `trigger.js`) against the live
+  Indeed API found and fixed two real bugs before they could reach production: (1) a TDZ bug in the new
+  classification code itself (`const` referenced before its declaration ran); (2) a **pre-existing** bug
+  (not introduced by this change) where JobSpy's own `emails` field was trusted as literal valid email
+  strings — a real run inserted a recipient with `email: "w"`. Fixed by routing JobSpy's raw output back
+  through this app's own `extractEmailsFrom` validation instead of trusting it as-is. Confirmed clean after
+  both fixes: real Indeed listings → batched classification (1 AI credit for a 7-listing batch, not 7) →
+  match-scoring → 2 genuine, valid recipients inserted. Bogus "w" test row deleted from the DB.
+  **Deliberately NOT flipped live**: `JOBSPY_SOURCING_ENABLED_GLOBALLY` (the production-wide env gate,
+  scheduler.js) is untouched — that's the operator's own 2026-08-31 deliberate safety boundary ("a real
+  code-level boundary, not just a per-row default"), left for an explicit go-ahead after showing real test
+  results, not bundled into "get started." Separately found: the `staging` PM2 process has been
+  crash-looping (100+ restarts) since creation — 5 `STAGING_*` GitHub Secrets were never actually set, so
+  its `.env` writes blank Supabase credentials every deploy. Unrelated to this work, real ops cleanup
+  needed eventually, not blocking.
 - **2026-09-03 — DONE: fixed a silent recipient-insert data-loss bug found while live-testing the AI
   classifier.** `automailsend_job_posts` got `match_algo_score`/`match_algo_reasoning` denormalized
   2026-08-28, but the matching columns were never added to `automailsend_recipients` even though

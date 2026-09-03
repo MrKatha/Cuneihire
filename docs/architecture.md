@@ -2355,3 +2355,47 @@ scraper.worker.js` (the collect/classify/finalize split), `backend/src/workers/j
 comment), `frontend/src/app/api/summarize-post/route.ts` + `frontend/src/lib/aiClient.ts` (comments only).
 
 **Files touched**: `backend/src/services/extraction.service.js` only. No schema change.
+
+## JobSpy/Indeed: classification gate mirrored + real end-to-end verification (2026-09-03 follow-up)
+Operator, after seeing today's own LinkedIn scrape yield thin numbers ("2-3 mails per LinkedIn scraping...
+that's not what we're offering"): agreed to prioritize activating the already-built JobSpy/Indeed pipeline
+over other roadmap work rather than building a new sourcing data structure from scratch — the schema
+(`automailsend_job_posts.source`) and the pipeline itself already existed (2026-08-31, dev/staging-gated).
+This closes the trip-wire left in the section above.
+
+**Investigated first, not assumed.** Confirmed via real `gh run view --log` output (not docs, not memory)
+that `python-jobspy` is genuinely installed and working on the production droplet, on every deploy — the
+gap was never infra readiness. The actual gap: the scheduler-driven pipeline had **never run successfully
+anywhere** — `trigger.js` (the only manual harness) never touches `jobspy.worker.js`, and the one place
+`JOBSPY_SOURCING_ENABLED_GLOBALLY=true` is set (`staging`) has been crash-looping (100+ restarts) since
+creation, because 5 `STAGING_*` GitHub Secrets its own `.env` heredoc references were never actually set —
+a separate, previously-undetected ops issue, unrelated to this feature, flagged but not fixed this pass.
+
+**Code**: mirrored `scraper.worker.js`'s collect→batch-classify→finalize split into `jobspy.worker.js`
+(`collectListings`-equivalent inline loop → `finalizeAndInsertListing` → `finalizeClassifiedListings`),
+reusing `classifyJobPosts` from `ai.service.js` unchanged — same batching, same fail-open behavior, same
+`ai_summary` byproduct at insert time. `jobspy_sourcing_enabled` (per-user DB flag) and
+`JOBSPY_SOURCING_ENABLED_GLOBALLY` (production-wide env boundary, deliberately unset in prod) are two
+independent gates — flipping the DB flag alone still does nothing today.
+
+**Verified with a real manual test harness** (mirrors `trigger.js`'s own "bypass the scheduler's timing,
+not the per-user consent flag" convention — queries `jobspy_sourcing_enabled=true` itself, calls
+`processJob` directly, never touches the global env gate), against the live Indeed API for the operator's
+real test account. Found and fixed two real bugs this surfaced:
+1. A TDZ bug in the new code itself (`const CLASSIFY_BATCH_SIZE` declared after a helper that read it had
+   already been invoked) — `Cannot access 'CLASSIFY_BATCH_SIZE' before initialization`.
+2. A **pre-existing** bug, not introduced by this change: `jobspy.worker.js` trusted JobSpy's own `emails`
+   field as literal, pre-validated email strings. A real run inserted a recipient with `email: "w"`. Fixed
+   by routing that field back through this app's own `extractEmailsFrom` (the same regex/validation the
+   listing description already goes through) instead of trusting it raw — no new export needed.
+
+Confirmed clean after both fixes: real Indeed listings → 7 distinct candidates batched into 1 classification
+call (1 AI credit, not 7) → match-scoring → 2 genuine, valid contacts inserted (`jaya@bvteck.com`,
+`humana@myworkday.com`). The bogus `"w"` row from the pre-fix run was deleted from the database.
+
+**Deliberately not flipped live.** `JOBSPY_SOURCING_ENABLED_GLOBALLY` is untouched in production — that's
+the operator's own 2026-08-31 decision, described in their own words as "a real code-level boundary, not
+just a per-row default that a user or a future admin action could quietly cross." Left for an explicit
+go-ahead once real results could be shown, not bundled into the general "get started" authorization.
+
+**Files touched**: `backend/src/workers/jobspy.worker.js` only. No schema change, no new exports elsewhere.

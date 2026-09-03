@@ -2,7 +2,7 @@ const pc = require("picocolors");
 const { supabase } = require("../config/supabase");
 const { extractEmailsFrom } = require("../services/extraction.service");
 const { runJobSpySearch } = require("../lib/jobspyBridge");
-const { scoreJobMatch } = require("../services/ai.service");
+const { scoreJobMatch, classifyJobPosts } = require("../services/ai.service");
 const { roleHasCriteria, computeAlgorithmicMatch, shouldEscalateToAI, looksLikeJobPost } = require("../services/matchAlgorithm.service");
 const { ExecutionLogger } = require("../lib/logger");
 const { getGlobalSettings } = require("../lib/globalSettings");
@@ -24,6 +24,14 @@ const { spendAiCredit } = require("../lib/aiCredits");
 // ensureMatchKeywords) — a role with ai_instructions set still gets scored correctly via the direct
 // scoreJobMatch AI call every time, just without that optimization's credit savings. Cheap to add later if
 // Indeed-sourced volume makes it worth it; not essential for v1 correctness.
+//
+// AI job-provider classification (2026-09-03) — mirrors scraper.worker.js's collectContacts/
+// finalizeAndInsertGroup/finalizeClassifiedContacts split (this file's own trip-wire comment, added the
+// same day the LinkedIn side gained this gate, said to do exactly this before jobspy_sourcing_enabled ever
+// goes live for real users). Indeed listings are structured job postings, not free-text social posts, so
+// the "is the author actually offering a job" ambiguity this gate exists for is inherently smaller here
+// than on LinkedIn — but it's not zero (a listing site can still surface a candidate's own "hire me" post),
+// so this stays symmetric with the LinkedIn pipeline rather than assuming it away.
 
 const RESULTS_PER_KEYWORD = process.env.JOBSPY_RESULTS_PER_KEYWORD ? parseInt(process.env.JOBSPY_RESULTS_PER_KEYWORD, 10) : 15;
 
@@ -45,6 +53,16 @@ async function processJobLogic(userId, logger, mappings, aiEnabled, aiCredits, a
   const successfullyInsertedEmails = [];
   const jobPostCache = new Map(); // job_url -> { id, needsScoring, matchScore, matchReasoning, matchSource } | null
 
+  // Two-pass AI job-provider classification (2026-09-03) — mirrors scraper.worker.js's LinkedIn-side split,
+  // per the trip-wire comment that used to live here: "Mirror scraper.worker.js's collectContacts/
+  // finalizeAndInsertGroup/finalizeClassifiedContacts split before jobspy_sourcing_enabled is ever turned
+  // on for real users." Every looksLikeJobPost-survivor across the WHOLE run is queued here; classified in
+  // size-capped batches AFTER the mappings loop finishes — see finalizeClassifiedListings below. Same
+  // reasoning as the LinkedIn side: the platform's one shared Gemini key is still on the 20-requests/day
+  // free tier, so this must not turn into one Gemini call per listing.
+  const classificationQueue = [];
+  const CLASSIFY_BATCH_SIZE = 20;
+
   for (const mapping of mappings) {
     const { keyword, role: roleToAssign, roleDef } = mapping;
     const location = (Array.isArray(roleDef.preferred_locations) && roleDef.preferred_locations[0]) || "";
@@ -65,8 +83,13 @@ async function processJobLogic(userId, logger, mappings, aiEnabled, aiCredits, a
 
       // Union JobSpy's own `emails` field (its regex pass over the listing) with our own extractEmailsFrom
       // over the same description — belt and suspenders, cheap, and keeps this in sync with any future
-      // change to this app's own email-detection rules automatically.
-      const emails = [...new Set([...(listing.emails || []), ...extractEmailsFrom(description)])].map((e) => e.toLowerCase());
+      // change to this app's own email-detection rules automatically. 2026-09-03 fix (found via a real
+      // end-to-end test): JobSpy's own `emails` field was being trusted as literal, already-valid email
+      // strings and inserted as-is — a real run produced a bare "w" as a "recipient email." Routing
+      // `listing.emails` back through this app's own extractEmailsFrom (same regex/validation the
+      // description already goes through) instead of trusting it raw fixes that, for free — no new export
+      // needed.
+      const emails = [...new Set(extractEmailsFrom([...(listing.emails || []), description].join(" ")))].map((e) => e.toLowerCase());
       const newEmails = emails.filter((e) => !allEmails.has(e));
       // No email discoverable in the listing text -> skip entirely (v1 deliberately does not guess a
       // generic company email — see docs/architecture.md's "Explicitly out of scope" for why). Same
@@ -79,14 +102,32 @@ async function processJobLogic(userId, logger, mappings, aiEnabled, aiCredits, a
         continue;
       }
 
-      // TRIP-WIRE (2026-09-03): scraper.worker.js's LinkedIn-side twin of this function gained a second
-      // gate here — a batched AI classifyJobPosts() call (ai.service.js) that rejects a job-SEEKER's own
-      // post, which looksLikeJobPost above never catches (it only catches promo/ad spam). This file was
-      // deliberately NOT updated to match (dev/staging-only, jobspy_sourcing_enabled, not customer-facing —
-      // see the header comment above), so an Indeed-sourced job-seeker post can still slip through today.
-      // Mirror scraper.worker.js's collectContacts/finalizeAndInsertGroup/finalizeClassifiedContacts split
-      // before jobspy_sourcing_enabled is ever turned on for real users.
+      // Claim these emails NOW, at collection time — not at insert time — for the same reason as the
+      // LinkedIn side: classification is deferred until the whole run finishes, so without claiming here,
+      // the same new email surfacing on two different listings found via different keywords in this same
+      // run (both still awaiting classification) could both survive this dedup check and both reach the
+      // insert step. Trade-off, accepted as bounded and rare: if THIS listing is later rejected by
+      // classification, a second legitimate listing with the same email later in this same run won't get a
+      // chance until the NEXT run (allEmails reloads fresh from the DB every run, see above).
+      newEmails.forEach((e) => allEmails.add(e));
 
+      classificationQueue.push({ listing, description, roleToAssign, keyword, roleDef, newEmails });
+    }
+  }
+
+  await finalizeClassifiedListings();
+
+  if (totalInserted === 0) {
+    await logger.append("WARN", "No new records to insert.");
+  } else {
+    await logger.append("SUCCESS", `Total Unique Contacts Inserted: ${totalInserted}`);
+  }
+
+  return { inserted: totalInserted, emails: successfullyInsertedEmails, phones: [] };
+
+  // --- helpers below, hoisted for readability; closures over the state above ---
+
+  async function finalizeAndInsertListing({ listing, description, roleToAssign, keyword, roleDef, newEmails }, aiDescription) {
       let jobPost = jobPostCache.get(listing.job_url);
       if (jobPost === undefined) {
         const { data, error } = await supabase
@@ -175,7 +216,7 @@ async function processJobLogic(userId, logger, mappings, aiEnabled, aiCredits, a
           "INFO",
           `Not saving "${listing.title}" — scored ${matchScore}/100 for role '${roleToAssign}' (below your ${matchStrictness} threshold): ${matchReasoning || "no reasoning given"}`
         );
-        continue;
+        return;
       }
 
       for (const email of newEmails) {
@@ -191,6 +232,11 @@ async function processJobLogic(userId, logger, mappings, aiEnabled, aiCredits, a
           source_url: listing.job_url,
           author_name: null, // JobSpy has no contact-person field, only a company name — see docs/architecture.md
           ...(matchScore != null ? { match_score: matchScore, match_reasoning: matchReasoning, match_source: matchSource } : {}),
+          // AI-classified job description (2026-09-03) — the same batched AI read that decided this listing
+          // is a real job posting also produced this clean, formatted description; no separate summarization
+          // call. Only set when classification actually ran and accepted this listing — see
+          // finalizeClassifiedListings below.
+          ...(aiDescription ? { ai_summary: aiDescription, ai_summary_generated_at: new Date().toISOString() } : {}),
           scraped_at: new Date().toISOString(),
           status: "pending",
         });
@@ -202,16 +248,76 @@ async function processJobLogic(userId, logger, mappings, aiEnabled, aiCredits, a
           successfullyInsertedEmails.push(email);
         }
       }
+  }
+
+  // Batched AI job-provider classification, run ONCE after the entire mappings loop finishes — not per
+  // keyword, not per listing. Mirrors scraper.worker.js's finalizeClassifiedContacts exactly (see that
+  // file's comments for the full quota-safety reasoning). Fails open on any unavailability.
+  async function finalizeClassifiedListings() {
+    if (classificationQueue.length === 0) return;
+
+    // Dedup by job_url — the same listing can be queued multiple times (different new email, different
+    // keyword) but only needs ONE classification read.
+    const postsByUrl = new Map();
+    for (const entry of classificationQueue) {
+      const url = entry.listing.job_url;
+      if (!postsByUrl.has(url)) postsByUrl.set(url, { contextText: entry.description, entries: [] });
+      postsByUrl.get(url).entries.push(entry);
+    }
+    const distinctPosts = [...postsByUrl.values()];
+
+    await logger.append(
+      "INFO",
+      `Classifying ${distinctPosts.length} candidate Indeed listing(s) (${classificationQueue.length} contact(s) queued) with AI before saving any of them...`
+    );
+
+    let classificationUnavailable = false;
+    for (let i = 0; i < distinctPosts.length; i += CLASSIFY_BATCH_SIZE) {
+      const chunk = distinctPosts.slice(i, i + CLASSIFY_BATCH_SIZE);
+      let results = null;
+
+      if (classificationUnavailable) {
+        // Already logged once below — don't spam, don't retry a budget/endpoint that just failed.
+      } else if (!aiEnabled || !(remainingCredits > 0)) {
+        await logger.append(
+          "WARN",
+          `AI job-provider classification unavailable (${!aiEnabled ? "AI personalization off" : "out of AI credits"}) — the remaining ${distinctPosts.length - i} candidate listing(s) will be saved unclassified this run, same as before this feature existed.`
+        );
+        classificationUnavailable = true;
+      } else {
+        try {
+          results = await classifyJobPosts(chunk.map((p) => ({ contextText: p.contextText })), aiTemperature, userId);
+          const spent = await spendAiCredit(supabase, userId);
+          remainingCredits = spent ? remainingCredits - 1 : 0;
+          if (results) {
+            await logger.append("INFO", `AI classified a batch of ${chunk.length} Indeed listing(s) (1 AI credit).`);
+          } else {
+            await logger.append("WARN", `AI classification response for a batch of ${chunk.length} listing(s) wasn't in the expected shape — treating this batch as unclassified.`);
+          }
+        } catch (err) {
+          await logger.append("WARN", `AI job-provider classification failed: ${err.message} — this and any remaining candidate listing(s) will be saved unclassified for the rest of this run.`);
+          classificationUnavailable = true;
+        }
+      }
+
+      for (let j = 0; j < chunk.length; j++) {
+        const post = chunk[j];
+        const result = results ? results[j] : null; // null = unclassified -> fail open
+
+        if (result && result.isJobProvider === false) {
+          for (const entry of post.entries) {
+            await logger.append("INFO", `Skipped a job-seeker/non-employer Indeed listing for role '${entry.roleToAssign}': ${result.reasoning || "reads like the author is looking for work, not offering it"}`);
+          }
+          continue; // never reaches finalizeAndInsertListing — reject before spending anything
+        }
+
+        const description = result && result.isJobProvider ? result.description : null;
+        for (const entry of post.entries) {
+          await finalizeAndInsertListing(entry, description);
+        }
+      }
     }
   }
-
-  if (totalInserted === 0) {
-    await logger.append("WARN", "No new records to insert.");
-  } else {
-    await logger.append("SUCCESS", `Total Unique Contacts Inserted: ${totalInserted}`);
-  }
-
-  return { inserted: totalInserted, emails: successfullyInsertedEmails, phones: [] };
 }
 
 async function processJob(job) {
