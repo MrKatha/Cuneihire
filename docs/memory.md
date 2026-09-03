@@ -2,6 +2,16 @@
 
 Newest on top. Terse bullets only — done / in-progress / locked decisions / open items. Update every phase.
 
+- **2026-09-03 — DONE: fixed a silent recipient-insert data-loss bug found while live-testing the AI
+  classifier.** `automailsend_job_posts` got `match_algo_score`/`match_algo_reasoning` denormalized
+  2026-08-28, but the matching columns were never added to `automailsend_recipients` even though
+  `scraper.worker.js`'s `matchFields` object was always spread into both the job_posts update and the
+  recipients insert. Every recipient insert where an algorithmic score was actually computed (any role with
+  structured criteria — the common case) has been silently failing with a schema-cache error since
+  2026-08-28, dropping that contact entirely, unrelated to and predating the classifier work. Found live via
+  a real `npm run trigger` run (2 of 3 new contacts failed to insert this way). Fixed by adding the two
+  missing columns to `automailsend_recipients` in both `supabase_setup.sql` files (byte-identical, applied
+  live via the Supabase Management API) — no code change needed, the insert logic was already correct.
 - **2026-09-03 — DONE: AI job-provider classification gate — stops emailing job-seekers as if they were
   employers.** Operator: sent a mail to someone searching for a job, not offering one — `looksLikeJobPost`
   only ever caught promo/ad spam, never checked post authorship. Fix: batched (not per-post) AI

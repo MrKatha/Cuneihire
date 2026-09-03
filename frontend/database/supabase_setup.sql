@@ -814,7 +814,16 @@ alter table public.automailsend_job_posts
   add column if not exists match_algo_reasoning text;
 
 alter table public.automailsend_recipients
-  add column if not exists match_source text;
+  add column if not exists match_source text,
+  -- 2026-09-03 fix: these two were denormalized onto automailsend_job_posts above (2026-08-28) but never
+  -- mirrored here, even though scraper.worker.js's applyMatchResult/matchFields was always built to spread
+  -- into BOTH the job_posts update and this table's recipient insert. Every insert where an algorithmic
+  -- score was actually computed (i.e. any role with structured criteria set — the common case) has been
+  -- silently failing with a "column not found in schema cache" error ever since, dropping that contact
+  -- entirely. Found live via a real scrape run testing the 2026-09-03 AI job-provider classification
+  -- feature — unrelated to that feature, a pre-existing gap it happened to surface.
+  add column if not exists match_algo_score integer,
+  add column if not exists match_algo_reasoning text;
 
 -- Phase 2 task 1 addendum (2026-08-28) — AI-curated match keywords, generated ONCE per role from
 -- ai_instructions (translated by ai.service.js's generateMatchKeywords) instead of reading the full post
