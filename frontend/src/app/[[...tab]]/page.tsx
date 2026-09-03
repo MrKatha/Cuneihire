@@ -1061,6 +1061,7 @@ export default function Home() {
               onAiSummaryGenerated={handleAiSummaryGenerated}
               pendingReplyFocus={pendingReplyFocus}
               onClearPendingReplyFocus={() => setPendingReplyFocus(null)}
+              onViewReply={(replyId) => setPendingReplyFocus(replyId)}
             />
           )}
 

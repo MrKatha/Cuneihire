@@ -114,6 +114,9 @@ type Props = {
   // (see fetchAiSummary below) — the API route already persisted it, this just keeps this session's own
   // state in sync so reopening the same recipient doesn't ask the network again.
   onAiSummaryGenerated?: (recipientId: string, summary: string) => void;
+  // Deep-link a reply card straight to that exact reply in the Responses sub-tab (2026-09-03, operator:
+  // "reply buttons... not taking me to the reply section"). See JamsTab.tsx's matching Props comment.
+  onViewReply?: (replyId: string) => void;
 };
 
 // Consolidated "everything about this contact/email" view — a right-side slide-over replacing the old
@@ -122,7 +125,7 @@ type Props = {
 // sidebar from the right side... all the information about the email, like something about the job, the
 // mail that we send, whether there are any follow-ups or not, if we receive a reply, and the link of the
 // posts and everything." One place, not three.
-export function EmailDetailPanel({ recipient: r, roleDefs, history, replies, onClose, onAiSummaryGenerated }: Props) {
+export function EmailDetailPanel({ recipient: r, roleDefs, history, replies, onClose, onAiSummaryGenerated, onViewReply }: Props) {
   // Computed once per mount via a lazy useState initializer, not called inline during render (React
   // Compiler purity rule flags a bare Date.now() in the render body, and still flags it inside useMemo —
   // a useState initializer is the one place the compiler accepts a one-time impure read). This only
@@ -252,7 +255,23 @@ export function EmailDetailPanel({ recipient: r, roleDefs, history, replies, onC
             ) : (
               <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem" }}>
                 {sortedReplies.map((rep) => (
-                  <div key={rep.id} style={{ border: "1px solid var(--accent)", borderRadius: "8px", padding: "0.5rem 0.65rem", fontSize: "0.8rem" }}>
+                  <div
+                    key={rep.id}
+                    role={onViewReply ? "button" : undefined}
+                    tabIndex={onViewReply ? 0 : undefined}
+                    onClick={() => onViewReply?.(rep.id)}
+                    onKeyDown={(e) => {
+                      if (onViewReply && (e.key === "Enter" || e.key === " ")) onViewReply(rep.id);
+                    }}
+                    title={onViewReply ? "Open in Responses" : undefined}
+                    style={{
+                      border: "1px solid var(--accent)",
+                      borderRadius: "8px",
+                      padding: "0.5rem 0.65rem",
+                      fontSize: "0.8rem",
+                      cursor: onViewReply ? "pointer" : undefined,
+                    }}
+                  >
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "0.5rem" }}>
                       <span>↩ {rep.fromEmail}</span>
                       {rep.receivedAt && <span className="hint compact">{new Date(rep.receivedAt).toLocaleString()}</span>}
@@ -260,6 +279,9 @@ export function EmailDetailPanel({ recipient: r, roleDefs, history, replies, onC
                     {rep.subject && <div style={{ marginTop: "0.2rem", fontWeight: 500 }}>{rep.subject}</div>}
                     {rep.bodySnippet && (
                       <div style={{ marginTop: "0.2rem", color: "var(--muted)", whiteSpace: "pre-wrap" }}>{rep.bodySnippet}</div>
+                    )}
+                    {onViewReply && (
+                      <div className="hint compact" style={{ marginTop: "0.3rem", color: "var(--accent)" }}>View in Responses →</div>
                     )}
                   </div>
                 ))}

@@ -39,6 +39,10 @@ type Props = {
   onDelayChange: (delaySec: number) => void;
   onUpdateStatus?: (id: string, field: "status" | "phone_status", newStatus: string) => Promise<void>;
   onAiSummaryGenerated?: (recipientId: string, summary: string) => void;
+  // Deep-link a reply click (the "↩ Replied" badge, or a reply card inside EmailDetailPanel) straight to
+  // that exact reply in the Responses sub-tab (2026-09-03, operator: "reply buttons... not taking me to
+  // the reply section"). Same pendingReplyFocus mechanism as the new-reply toast — see JamsHub.tsx.
+  onViewReply?: (replyId: string) => void;
 };
 
 function sentKey(email: string, role: Role) {
@@ -72,6 +76,7 @@ export function JamsTab({
   delaySec,
   onDelayChange,
   onAiSummaryGenerated,
+  onViewReply,
 }: Props) {
   const [filterStatus, setFilterStatus] = useState("all");
   const [filterSource, setFilterSource] = useState("all");
@@ -495,9 +500,21 @@ export function JamsTab({
                     <td style={{ padding: "0.5rem 0.6rem" }}>
                       <StatusPill status={r.status} />
                       {r.hasReplied && (
-                        <span className="badge ok" style={{ marginLeft: "0.4rem", fontSize: "0.65rem" }} title="Replied to this outreach">
+                        <button
+                          type="button"
+                          className="badge ok"
+                          style={{ marginLeft: "0.4rem", font: "inherit", fontSize: "0.65rem", cursor: "pointer", background: "none" }}
+                          title="Jump to this reply in Responses"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            const latest = repliesFor(r).sort(
+                              (a, b) => new Date(b.receivedAt || 0).getTime() - new Date(a.receivedAt || 0).getTime()
+                            )[0];
+                            if (latest) onViewReply?.(latest.id);
+                          }}
+                        >
                           ↩ Replied{(r.replyCount || 0) > 1 ? ` (${r.replyCount})` : ""}
-                        </span>
+                        </button>
                       )}
                     </td>
                     <td style={{ padding: "0.5rem 0.6rem" }}>
@@ -553,6 +570,7 @@ export function JamsTab({
           history={historyFor(detailRecipient)}
           replies={repliesFor(detailRecipient)}
           onAiSummaryGenerated={onAiSummaryGenerated}
+          onViewReply={onViewReply}
           onClose={() => setDetailRecipientId(null)}
         />
       )}

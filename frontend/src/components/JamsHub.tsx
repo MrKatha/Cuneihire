@@ -50,6 +50,10 @@ type Props = {
   // anyway: a plain "external override wins over local state until explicitly cleared" derivation is enough.
   pendingReplyFocus?: string | null;
   onClearPendingReplyFocus?: () => void;
+  // Deep-link a reply click from inside the Emails sub-tab (the "↩ Replied" badge, or a reply card in
+  // EmailDetailPanel) straight to that exact reply here in Responses — same pendingReplyFocus state,
+  // just set from a different call site than the toast. See JamsTab.tsx's Props comment.
+  onViewReply?: (replyId: string) => void;
 };
 
 // JAMS as the app's main landing page (2026-08-25, operator ask — "just keep like jams as our main
@@ -82,6 +86,7 @@ export function JamsHub({
   onAiSummaryGenerated,
   pendingReplyFocus,
   onClearPendingReplyFocus,
+  onViewReply,
 }: Props) {
   const [subTab, setSubTab] = useState<JamsSubTab>("overview");
   // A pending reply focus always wins over whatever sub-tab was locally selected, until it's cleared (by
@@ -156,6 +161,7 @@ export function JamsHub({
             onDelayChange={onDelayChange}
             onUpdateStatus={onUpdateStatus}
             onAiSummaryGenerated={onAiSummaryGenerated}
+            onViewReply={onViewReply}
           />
         )}
 
