@@ -1,0 +1,33 @@
+name: Ingest ATS Job Pool
+
+# Refreshes automailsend_ats_job_pool from the open "jobhive" dataset (Greenhouse/Lever/Ashby/
+# SmartRecruiters) -- see backend/src/scripts/ats_pool_ingest.py's own header and that table's comment in
+# supabase_setup.sql for the full design. Runs here, not on the production droplet -- that box has 911MB
+# total RAM and was confirmed (2026-09-04) to OOM-kill on downloads far smaller than what this pulls; a GH
+# Actions runner has 7GB+, handling the combined ~344MB Parquet set in one shot with no streaming needed.
+# Daily cron matches the dataset's own observed ~daily upstream refresh (its Last-Modified header).
+
+on:
+  schedule:
+    - cron: "0 3 * * *" # 03:00 UTC daily
+  workflow_dispatch: # manual trigger, e.g. for the first real run / re-testing after a script change
+
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install httpx pyarrow pandas
+
+      - name: Run ingestion
+        env:
+          ATS_POOL_SUPABASE_URL: ${{ secrets.ATS_POOL_SUPABASE_URL }}
+          ATS_POOL_SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.ATS_POOL_SUPABASE_SERVICE_ROLE_KEY }}
+        run: python backend/src/scripts/ats_pool_ingest.py

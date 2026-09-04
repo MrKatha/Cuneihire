@@ -1095,3 +1095,62 @@ set reply_type = case
   else 'human'
 end
 where reply_type = 'human'; -- only re-derive rows still on the default; never overwrite a later manual correction
+
+-- Shared ATS job pool (2026-09-04) -- operator: "we should be able to choose only this database to fulfill
+-- our overall package requirements... whenever the user provides a keyword... it will look for jobs in our
+-- database first." Sourced from the open-source `ats-scrapers`/"jobhive" dataset (MIT, live jobs pulled
+-- directly from ATS platforms' own public APIs -- Greenhouse/Lever/Ashby/SmartRecruiters -- not scraped
+-- consumer job boards, so none of the Cloudflare blocking ZipRecruiter/Glassdoor hit applies). Deliberately
+-- NOT shaped like automailsend_job_posts: that table is per-user by construction
+-- (unique(user_id, source_url) -- the same posting scraped by two users gets two separate rows). This pool
+-- is the opposite on purpose -- one row per real posting, globally shared, `unique(source_url)` -- ingested
+-- once by a scheduled GitHub Actions job (backend/src/scripts/ats_pool_ingest.py, see
+-- .github/workflows/ats-pool-ingest.yml; runs there and not on the production droplet because that box has
+-- 911MB total RAM and OOM-kills well before a single platform's Parquet file finishes downloading,
+-- confirmed live 2026-09-04), then searched per-user by atsPool.worker.js, which copies any real match into
+-- the existing automailsend_job_posts/automailsend_recipients pipeline unchanged (same
+-- computeAlgorithmicMatch/insert path every other source already uses) -- this table itself is never
+-- user-facing or referenced by a foreign key, so pruning it by age alone (see ats_pool_ingest.py) is always
+-- safe. `country_iso` is real but sparse (~84% blank in real sampled data) -- `location` free text is the
+-- more complete field, kept alongside it rather than relied on alone.
+create table if not exists public.automailsend_ats_job_pool (
+  id uuid primary key default gen_random_uuid(),
+  source_url text not null,
+  ats_type text not null, -- 'greenhouse' | 'lever' | 'ashby' | 'smartrecruiters' (Workday deliberately excluded for now -- see architecture.md)
+  title text not null,
+  company text,
+  location text,
+  country_iso text,
+  is_remote boolean,
+  description text, -- full plain-text posting (HTML/Markdown already stripped upstream), same shape extractEmailsFrom() already handles for LinkedIn/Indeed
+  posted_at timestamp with time zone,
+  ingested_at timestamp with time zone not null default timezone('utc'::text, now()),
+  unique(source_url)
+);
+
+create index if not exists idx_ats_job_pool_posted_at
+  on public.automailsend_ats_job_pool (posted_at desc);
+
+-- Full-text search over title+description -- what atsPool.worker.js queries per role keyword, instead of a
+-- live external API call. A generated STORED column, not a bare expression index -- supabase-js's own
+-- .textSearch(column, query) filter needs a real tsvector column to reference; an index over a raw
+-- expression (this block's first draft) isn't addressable from the client library, only from hand-written
+-- SQL, which the JS-side worker doesn't use.
+alter table public.automailsend_ats_job_pool
+  add column if not exists fts tsvector
+  generated always as (to_tsvector('english', coalesce(title, '') || ' ' || coalesce(description, ''))) stored;
+
+create index if not exists idx_ats_job_pool_fts
+  on public.automailsend_ats_job_pool
+  using gin (fts);
+
+-- RLS on, no policy -- matches this file's own "8. Enable RLS on all tables" convention. Unlike
+-- automailsend_global_settings (which has a public-read policy since the frontend reads it directly), this
+-- table has no legitimate anon-key access path at all: only the backend's service-role key (which bypasses
+-- RLS entirely) ever touches it, via ats_pool_ingest.py and atsPool.worker.js. Locked down by default.
+alter table public.automailsend_ats_job_pool enable row level security;
+
+-- automailsend_job_posts.source gains a third real value here: 'ats_pool' (atsPool.worker.js), alongside the
+-- existing 'linkedin_scrape' | 'jobspy_indeed' (see that column's original 2026-08-31 definition above) --
+-- same write-only/observability precedent, no worker branches on this value, no schema change needed since
+-- it's a plain text column.

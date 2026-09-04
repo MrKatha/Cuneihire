@@ -2,6 +2,7 @@ const pc = require("picocolors");
 const { supabase } = require("./config/supabase");
 const { processJob } = require("./workers/scraper.worker");
 const { processJob: processJobSpyJob } = require("./workers/jobspy.worker");
+const { processJob: processAtsPoolJob } = require("./workers/atsPool.worker");
 const { runAutomailJobs } = require("./workers/automail.worker");
 
 const { processBatchSendJob } = require("./workers/batchSend.worker");
@@ -203,10 +204,12 @@ function startScheduler() {
   // not need to know what is happening in the backend"). This env var remains the one real kill switch —
   // now set true in production too (flipped live 2026-09-03, verified via `pm2 logs` showing this loop
   // start) — kept as a code-level boundary in case a fast rollback is ever needed, not as a staging-only gate.
+  // 2026-09-04 fix: this used to be an early `return` when unset, which silently skipped every loop
+  // registered after it too (including the new ATS pool loop below) -- each gate must only skip its OWN
+  // loop, never the rest of startScheduler. Converted to if/else for exactly that reason.
   if (process.env.JOBSPY_SOURCING_ENABLED_GLOBALLY !== "true") {
     console.log(pc.dim("[Scheduler] JobSpy/Indeed worker not started — JOBSPY_SOURCING_ENABLED_GLOBALLY is not set in this environment."));
-    return;
-  }
+  } else {
   const jobspyTickSec = process.env.JOBSPY_SCHEDULER_INTERVAL_SEC ? parseInt(process.env.JOBSPY_SCHEDULER_INTERVAL_SEC, 10) : 60;
   const jobspyIntervalMin = process.env.JOBSPY_INTERVAL_MIN ? parseInt(process.env.JOBSPY_INTERVAL_MIN, 10) : 60;
   console.log(pc.green(`🚀 Starting JobSpy/Indeed Worker (checking every ${jobspyTickSec} seconds, ${jobspyIntervalMin}min between runs per user)...`));
@@ -256,6 +259,75 @@ function startScheduler() {
       }
     }
   }, jobspyTickSec * 1000);
+  }
+
+  // Internal ATS job pool search (2026-09-04) -- 7th independent loop, own local queued-throttle map, same
+  // shape as the JobSpy loop above but no per-user opt-in column at all: this is a plain query against
+  // automailsend_ats_job_pool (populated separately by the scheduled ats_pool_ingest.py GitHub Actions job,
+  // not by this process), so there's no external site to rate-limit against and no reason to gate it behind
+  // a toggle -- same "no toggle, backend default-on" precedent as JobSpy/Indeed's own 2026-09-03 promotion.
+  // Runs far more often than JobSpy's 60min (ATS_POOL_INTERVAL_MIN, default 15) precisely because it's a
+  // free local DB read with none of JobSpy's live-scraping rate-limit/blocking concerns -- see
+  // atsPool.worker.js's header comment for why that shorter interval, not an explicit shortfall trigger, is
+  // this pass's answer to "search internal first, fall back to external scrapers only if short."
+  //
+  // ATS_POOL_SEARCH_ENABLED_GLOBALLY still gates the loop at all (unset = it never starts) -- kept as a
+  // fast, code-level operational rollback lever, same shape as JobSpy's gate, even though the actual risk
+  // profile here is much lower (a local DB read against a source about to be verified clean, not a live
+  // external scrape) -- cheap insurance, not a staged-rollout gate.
+  // Same if/else shape as the JobSpy gate above, not a bare `return` -- see that gate's 2026-09-04 comment:
+  // a `return` here would silently skip any future loop registered after this one (this is the last loop
+  // today, but that's exactly the assumption that broke JobSpy's gate).
+  if (process.env.ATS_POOL_SEARCH_ENABLED_GLOBALLY !== "true") {
+    console.log(pc.dim("[Scheduler] Internal ATS job pool worker not started — ATS_POOL_SEARCH_ENABLED_GLOBALLY is not set in this environment."));
+  } else {
+  const atsPoolTickSec = process.env.ATS_POOL_SCHEDULER_INTERVAL_SEC ? parseInt(process.env.ATS_POOL_SCHEDULER_INTERVAL_SEC, 10) : 60;
+  const atsPoolIntervalMin = process.env.ATS_POOL_INTERVAL_MIN ? parseInt(process.env.ATS_POOL_INTERVAL_MIN, 10) : 15;
+  console.log(pc.green(`🚀 Starting Internal ATS Job Pool Worker (checking every ${atsPoolTickSec} seconds, ${atsPoolIntervalMin}min between runs per user)...`));
+  const lastAtsPoolQueuedMap = new Map();
+  setInterval(async () => {
+    console.log(pc.dim(`[Scheduler] Checking for users due for internal job-pool search...`));
+
+    const { data: users, error } = await supabase.from("automailsend_app_state").select("*");
+
+    if (error) {
+      console.error(pc.red(`[Scheduler] Error fetching users for ATS pool search: ${error.message}`));
+      return;
+    }
+    if (!users || users.length === 0) return;
+
+    for (const user of users) {
+      try {
+        const { data: logs } = await supabase
+          .from("automailsend_execution_logs")
+          .select("created_at")
+          .eq("user_id", user.user_id)
+          .contains("details", { jobType: "ats_pool" })
+          .order("created_at", { ascending: false })
+          .limit(1);
+
+        let shouldRun = true;
+        if (logs && logs.length > 0) {
+          const diffMin = (Date.now() - new Date(logs[0].created_at).getTime()) / (1000 * 60);
+          if (diffMin < atsPoolIntervalMin) shouldRun = false;
+        }
+
+        const lastQueued = lastAtsPoolQueuedMap.get(user.user_id) || 0;
+        if (Date.now() - lastQueued < 60000) shouldRun = false;
+
+        if (shouldRun) {
+          lastAtsPoolQueuedMap.set(user.user_id, Date.now());
+          console.log(pc.cyan(`✨ [Scheduler] Triggering internal job-pool search for user ${user.user_id.split('-')[0]}... (interval reached)`));
+          processAtsPoolJob({ data: user }).catch(err => {
+            console.error(pc.red(`[Scheduler/Worker] ATS pool job failed: ${err.message}`));
+          });
+        }
+      } catch (err) {
+        console.error(pc.red(`[Scheduler] Failed to process ATS pool job for user ${user.user_id}: ${err.message}`));
+      }
+    }
+  }, atsPoolTickSec * 1000);
+  }
 }
 
 module.exports = { startScheduler };
