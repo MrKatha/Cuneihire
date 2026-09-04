@@ -2445,3 +2445,30 @@ monthly total. Explicitly deferred by the operator ("we will change the package 
 priority is to make the Indeed work") — not touched this pass. Revisit in `docs/pricing-tiers.md` when the
 package-structure phase starts; the $18/mo-ish cost-to-serve estimate there also still needs the
 AI-classification-cost refresh noted in the pricing-tiers doc itself.
+
+### Reply-type classification: human vs. auto-ticket / out-of-office / bounce (2026-09-04)
+
+A real JobSpy test send to `applicantaccom@maximus.com` (a generic HR inbox) came back within minutes as a
+Freshservice-generated support-ticket acknowledgment, not a person — JAMS's "↩ Replied" badge showed it
+identically to a genuine human reply. Sending to generic HR/careers inboxes is intended behavior (that's how
+job-portal listings' contact emails work) and stays as-is; this is purely a JAMS display fix so an automated
+acknowledgment doesn't read as real engagement.
+
+`replyPoll.worker.js` gained `classifyReplyType(fromEmail, subject, bodySnippet)` — regex-only, no AI call
+(these auto-reply formats are highly standardized boilerplate: `mailer-daemon@`/`postmaster@` senders and
+"Undeliverable"/"Delivery Status Notification" subjects → `bounce`; "ticket has been created"/helpdesk
+platform names (Freshservice, Zendesk, ServiceNow) → `auto_ticket`; "Automatic reply:"/"Out of office" →
+`out_of_office`; else → `human`). Runs once per matched inbound message, right before the
+`automailsend_replies` insert. New `reply_type` column, default `'human'`, backfilled for all pre-existing
+rows via the same regex logic run server-side in SQL — verified by hand against all 8 real rows that existed
+at the time (1 auto_ticket, 1 out_of_office, 3 bounce, 3 human, all correct).
+
+Frontend: `frontend/src/lib/jobPosts.ts`'s new `replyTypeInfo()` is the single source of truth for the
+label/badge class, shared by JamsTab.tsx's "Replied" badge (now varies label + color by type) and
+EmailDetailPanel.tsx's reply cards (non-human replies get a small badge tag and a dimmed border, so a real
+reply still reads as the visually stronger signal in a mixed list).
+
+**Deliberately not touched**: `automailsend_recipients.has_replied`/`reply_count` still increment for every
+matched type including bounces — a delivery-failure notification isn't really "a reply" in the meaningful
+sense, but changing that semantic wasn't asked for and touches more surfaces (JAMS filters, admin stats) than
+this pass's scope. Worth a future look if it causes confusion.

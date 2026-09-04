@@ -1073,3 +1073,25 @@ alter table public.automailsend_global_settings
 alter table public.automailsend_recipients
   add column if not exists ai_summary text,                    -- null = not yet generated
   add column if not exists ai_summary_generated_at timestamptz;
+
+-- Reply-type classification (2026-09-04) -- operator, after a real JobSpy test send to a generic HR inbox
+-- (applicantaccom@maximus.com) came back as a Freshservice auto-ticket acknowledgment, not a human reply:
+-- "the jams auto-tag stuff... would be great and a good help to the user." Nothing wrong with sending to
+-- generic HR/careers inboxes (kept as-is, by design) -- this is purely a JAMS display fix, so an auto-ticket/
+-- out-of-office/bounce acknowledgment isn't visually indistinguishable from someone actually reading the
+-- email. Cheap regex classification (replyPoll.worker.js's classifyReplyType), not an AI call -- these
+-- auto-reply patterns are highly standardized text, not a judgment call worth spending the shared 20/day
+-- Gemini quota on. Backfilled below for the handful of replies recorded before this column existed.
+alter table public.automailsend_replies
+  add column if not exists reply_type text not null default 'human'; -- 'human' | 'auto_ticket' | 'out_of_office' | 'bounce'
+
+update public.automailsend_replies
+set reply_type = case
+  when from_email ~* '^(mailer-daemon|postmaster)@'
+    or subject ~* '^(undeliverable|delivery status notification|mail delivery failed|returned mail)' then 'bounce'
+  when subject ~* '(ticket (has been|was|#|number)|support ticket|case #|\[#[a-z0-9-]+\])'
+    or body_snippet ~* '(a ticket has been created|your ticket|ticket number|helpdesk|freshservice|zendesk|servicenow)' then 'auto_ticket'
+  when subject ~* '^(automatic reply|auto-?reply|out of office)' then 'out_of_office'
+  else 'human'
+end
+where reply_type = 'human'; -- only re-derive rows still on the default; never overwrite a later manual correction

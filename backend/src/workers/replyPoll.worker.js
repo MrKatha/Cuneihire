@@ -23,6 +23,30 @@ function normalizeId(id) {
   return (id || "").trim();
 }
 
+// Reply-type classification (2026-09-04) -- a matched inbound message can be a real human reply, or a
+// company's own auto-response (helpdesk ticket confirmation, out-of-office, delivery bounce). All three
+// are legitimate, attributable matches (matchReply already confirmed this), but JAMS showing "↩ Replied"
+// identically for a Freshservice ticket ack and an actual hiring manager is misleading -- found live via a
+// real JobSpy test send to applicantaccom@maximus.com, which came back as a Freshservice-generated support
+// ticket, not a person. Cheap regex classification, not an AI call -- these auto-reply formats are highly
+// standardized boilerplate, not a judgment call worth spending the shared 20/day Gemini quota on. Order
+// matters: bounce and auto_ticket checks run before out_of_office since a ticket-system ack can itself use
+// "reply" language that would otherwise false-positive as OOO.
+const BOUNCE_SENDER_RE = /^(mailer-daemon|postmaster)@/i;
+const BOUNCE_SUBJECT_RE = /^(undeliverable|delivery status notification|mail delivery failed|returned mail)/i;
+const TICKET_SUBJECT_RE = /(ticket (has been|was|#|number)|support ticket|case #|\[#[a-z0-9-]+\])/i;
+const TICKET_BODY_RE = /(a ticket has been created|your ticket|ticket number|helpdesk|freshservice|zendesk|servicenow)/i;
+const OOO_SUBJECT_RE = /^(automatic reply|auto-?reply|out of office)/i;
+
+function classifyReplyType(fromEmail, subject, bodySnippet) {
+  const subj = subject || "";
+  const body = (bodySnippet || "").slice(0, 2000);
+  if (BOUNCE_SENDER_RE.test(fromEmail || "") || BOUNCE_SUBJECT_RE.test(subj)) return "bounce";
+  if (TICKET_SUBJECT_RE.test(subj) || TICKET_BODY_RE.test(body)) return "auto_ticket";
+  if (OOO_SUBJECT_RE.test(subj)) return "out_of_office";
+  return "human";
+}
+
 function computeSinceDate(lastPolledAt) {
   const now = Date.now();
   if (!lastPolledAt) {
@@ -142,6 +166,7 @@ async function pollAccount(supabase, account, logger) {
             .eq("role", sentLogRow.role)
             .maybeSingle();
 
+          const bodySnippet = (parsed.text || "").slice(0, SNIPPET_MAX_CHARS) || null;
           const { error: insertErr } = await supabase.from("automailsend_replies").insert({
             user_id: userId,
             smtp_account_id: account.id,
@@ -149,11 +174,12 @@ async function pollAccount(supabase, account, logger) {
             sent_log_id: sentLogRow.id,
             from_email: fromEmail,
             subject: parsed.subject || null,
-            body_snippet: (parsed.text || "").slice(0, SNIPPET_MAX_CHARS) || null,
+            body_snippet: bodySnippet,
             message_id: messageId,
             in_reply_to: normalizeId(parsed.inReplyTo) || null,
             match_method: matched.matchMethod,
             received_at: parsed.date ? parsed.date.toISOString() : null,
+            reply_type: classifyReplyType(fromEmail, parsed.subject, bodySnippet),
           });
 
           if (insertErr) {
@@ -242,4 +268,4 @@ async function processReplyPollJob(supabase) {
   }
 }
 
-module.exports = { processReplyPollJob, matchReply, stripSubjectPrefix, computeSinceDate };
+module.exports = { processReplyPollJob, matchReply, stripSubjectPrefix, computeSinceDate, classifyReplyType };

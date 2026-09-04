@@ -58,3 +58,16 @@ export function matchScoreTone(score: number | null | undefined): { label: strin
   if (score >= 40) return { label: `${score} — Partial match`, color: "var(--warn)" };
   return { label: `${score} — Weak match`, color: "var(--danger)" };
 }
+
+// Shared between JamsTab.tsx's "Replied" badge and EmailDetailPanel.tsx's reply cards (2026-09-04) — a
+// matched inbound reply can be a real human, or a company's own auto-response (helpdesk ticket ack,
+// out-of-office, delivery bounce). All three are legitimate matches, but showing them all as an identical
+// "↩ Replied" is misleading — found live when a JobSpy test send to a generic HR inbox came back as a
+// Freshservice support-ticket confirmation, not a person. replyType itself is classified server-side
+// (replyPoll.worker.js's classifyReplyType); this just maps it to a label/badge class for display.
+export function replyTypeInfo(replyType: string | undefined): { label: string; badgeClass: "ok" | "warn" | "danger" } {
+  if (replyType === "auto_ticket") return { label: "🎫 Auto-ticket", badgeClass: "warn" };
+  if (replyType === "out_of_office") return { label: "📭 Out of office", badgeClass: "warn" };
+  if (replyType === "bounce") return { label: "⚠ Bounced", badgeClass: "danger" };
+  return { label: "↩ Replied", badgeClass: "ok" };
+}

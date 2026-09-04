@@ -15,7 +15,7 @@ import {
   type SmtpAccount,
   type SmtpConfig,
 } from "@/lib/types";
-import { matchScoreTone, firstUrl } from "@/lib/jobPosts";
+import { matchScoreTone, firstUrl, replyTypeInfo } from "@/lib/jobPosts";
 import { StatusPill } from "./JobPostCard";
 import { EmailDetailPanel } from "./EmailDetailPanel";
 
@@ -536,23 +536,26 @@ export function JamsTab({
                     </td>
                     <td style={{ padding: "0.5rem 0.6rem" }}>
                       <StatusPill status={r.status} />
-                      {r.hasReplied && (
-                        <button
-                          type="button"
-                          className="badge ok"
-                          style={{ marginLeft: "0.4rem", font: "inherit", fontSize: "0.65rem", cursor: "pointer", background: "none" }}
-                          title="Jump to this reply in Responses"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            const latest = repliesFor(r).sort(
-                              (a, b) => new Date(b.receivedAt || 0).getTime() - new Date(a.receivedAt || 0).getTime()
-                            )[0];
-                            if (latest) onViewReply?.(latest.id);
-                          }}
-                        >
-                          ↩ Replied{(r.replyCount || 0) > 1 ? ` (${r.replyCount})` : ""}
-                        </button>
-                      )}
+                      {r.hasReplied && (() => {
+                        const latest = repliesFor(r).sort(
+                          (a, b) => new Date(b.receivedAt || 0).getTime() - new Date(a.receivedAt || 0).getTime()
+                        )[0];
+                        const { label, badgeClass } = replyTypeInfo(latest?.replyType);
+                        return (
+                          <button
+                            type="button"
+                            className={`badge ${badgeClass}`}
+                            style={{ marginLeft: "0.4rem", font: "inherit", fontSize: "0.65rem", cursor: "pointer", background: "none" }}
+                            title={latest?.replyType && latest.replyType !== "human" ? "Automated reply, not a person — click to view in Responses" : "Jump to this reply in Responses"}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (latest) onViewReply?.(latest.id);
+                            }}
+                          >
+                            {label}{(r.replyCount || 0) > 1 ? ` (${r.replyCount})` : ""}
+                          </button>
+                        );
+                      })()}
                     </td>
                     <td style={{ padding: "0.5rem 0.6rem" }}>
                       <span className="hint" style={{ margin: 0 }}>{r.source === "manual" ? "Manual" : "Auto-fetch"}</span>

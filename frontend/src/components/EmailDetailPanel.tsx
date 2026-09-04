@@ -10,7 +10,7 @@ import {
   type RoleDef,
   type SentRecord,
 } from "@/lib/types";
-import { matchScoreTone, firstUrl } from "@/lib/jobPosts";
+import { matchScoreTone, firstUrl, replyTypeInfo } from "@/lib/jobPosts";
 import { friendlySendError } from "@/lib/friendlyError";
 import { StatusPill } from "./JobPostCard";
 
@@ -264,7 +264,10 @@ export function EmailDetailPanel({ recipient: r, roleDefs, history, replies, onC
               <p className="hint compact" style={{ margin: 0 }}>No replies received yet.</p>
             ) : (
               <div style={{ display: "flex", flexDirection: "column", gap: "0.4rem" }}>
-                {sortedReplies.map((rep) => (
+                {sortedReplies.map((rep) => {
+                  const { label, badgeClass } = replyTypeInfo(rep.replyType);
+                  const isHuman = !rep.replyType || rep.replyType === "human";
+                  return (
                   <div
                     key={rep.id}
                     role={onViewReply ? "button" : undefined}
@@ -273,9 +276,11 @@ export function EmailDetailPanel({ recipient: r, roleDefs, history, replies, onC
                     onKeyDown={(e) => {
                       if (onViewReply && (e.key === "Enter" || e.key === " ")) onViewReply(rep.id);
                     }}
-                    title={onViewReply ? "Open in Responses" : undefined}
+                    title={onViewReply ? (isHuman ? "Open in Responses" : "Automated reply, not a person — open in Responses") : undefined}
                     style={{
-                      border: "1px solid var(--accent)",
+                      // Dimmed border for an automated reply (ticket ack / OOO / bounce) so a genuine human
+                      // reply still reads as the visually stronger signal at a glance (2026-09-04).
+                      border: `1px solid ${isHuman ? "var(--accent)" : "var(--line)"}`,
                       borderRadius: "8px",
                       padding: "0.5rem 0.65rem",
                       fontSize: "0.8rem",
@@ -283,7 +288,10 @@ export function EmailDetailPanel({ recipient: r, roleDefs, history, replies, onC
                     }}
                   >
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "0.5rem" }}>
-                      <span>↩ {rep.fromEmail}</span>
+                      <span style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}>
+                        {isHuman ? `↩ ${rep.fromEmail}` : rep.fromEmail}
+                        {!isHuman && <span className={`badge ${badgeClass}`} style={{ fontSize: "0.65rem" }}>{label}</span>}
+                      </span>
                       {rep.receivedAt && <span className="hint compact">{new Date(rep.receivedAt).toLocaleString()}</span>}
                     </div>
                     {rep.subject && <div style={{ marginTop: "0.2rem", fontWeight: 500 }}>{rep.subject}</div>}
@@ -294,7 +302,8 @@ export function EmailDetailPanel({ recipient: r, roleDefs, history, replies, onC
                       <div className="hint compact" style={{ marginTop: "0.3rem", color: "var(--accent)" }}>View in Responses →</div>
                     )}
                   </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </Section>

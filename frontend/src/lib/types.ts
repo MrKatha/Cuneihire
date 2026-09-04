@@ -493,6 +493,10 @@ export type ReplyRecord = {
   bodySnippet?: string;
   receivedAt?: string;
   matchMethod?: "header" | "sender_subject";
+  // Added 2026-09-04 — classifyReplyType (replyPoll.worker.js) tags every matched reply so JAMS can show
+  // a helpdesk-ticket ack or an out-of-office differently from a genuine human reply, instead of an
+  // identical "↩ Replied" badge for both. See docs/architecture.md's "Reply-type classification" section.
+  replyType?: "human" | "auto_ticket" | "out_of_office" | "bounce";
   // Added 2026-09-01 for the Responses tab's manual-reply feature (ResponseDetailPanel.tsx) — messageId
   // becomes the In-Reply-To header on a manual reply so it threads properly in the recipient's inbox
   // instead of landing as an unrelated new email; smtpAccountId picks which of the user's SMTP accounts

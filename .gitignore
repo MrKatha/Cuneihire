@@ -46,3 +46,6 @@ next-env.d.ts
 # generated from extension/ by frontend/scripts/build-extension-zip.js (pre/build hooks) — never hand-edit
 # or commit this, it's always regenerated fresh so it can't go stale again (see that script's header).
 frontend/public/cuneihire-extension.zip
+
+# Personal Claude Code permission overrides (machine-local, never shared)
+.claude/settings.local.json

@@ -2,6 +2,18 @@
 
 Newest on top. Terse bullets only — done / in-progress / locked decisions / open items. Update every phase.
 
+- **2026-09-04 — DONE: reply-type classification (human vs. auto-ticket/OOO/bounce).** Found via a real
+  JobSpy test send to `applicantaccom@maximus.com` — came back as a Freshservice support-ticket ack, not a
+  person; JAMS showed it identically to a real reply. Operator confirmed sending to generic HR/careers
+  inboxes is intended, no change there — just wanted the auto-generated ones visually flagged: "the jams
+  auto-tag stuff... would be great and a good help to the user." Cheap regex classifier
+  (`replyPoll.worker.js`'s `classifyReplyType`, no AI call — these formats are standardized boilerplate),
+  new `automailsend_replies.reply_type` column (`human` default), backfilled and verified correct against
+  all 8 real existing rows (1 auto_ticket, 1 out_of_office, 3 bounce, 3 human — all matched by hand-check).
+  Frontend: `jobPosts.ts`'s new `replyTypeInfo()` shared by JamsTab's "Replied" badge and
+  EmailDetailPanel's reply cards — non-human replies get a distinct badge/label and a dimmed card border so
+  a genuine reply still reads as the stronger signal. Did NOT touch `has_replied`/`reply_count` semantics
+  (a bounce still counts as "replied" today) — out of scope, not what was asked.
 - **2026-09-03 (later) — DONE: JobSpy/Indeed flipped live in production; opt-in toggle removed entirely,
   now always-on.** Operator: "you have my AWS access. You can do whatever you have to do by yourself" +
   "the user does not need to know about what is happening in the backend... Remove the toggle, make the
