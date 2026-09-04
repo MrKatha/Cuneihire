@@ -38,6 +38,7 @@ import os
 import json
 import math
 import tempfile
+import time
 from datetime import datetime, timedelta, timezone
 
 import httpx
@@ -46,7 +47,14 @@ import pyarrow.parquet as pq
 PLATFORMS = ["greenhouse", "lever", "ashby", "smartrecruiters"]
 RECENCY_DAYS = 30
 RETENTION_DAYS = 90
-BATCH_SIZE = 500
+# 2026-09-04: a real full run against the live table (already holding the prior Lever ingest) hit Postgres
+# error 57014 "canceling statement due to statement timeout" on batch 46/368 at BATCH_SIZE=500 -- per-batch
+# latency was visibly climbing (7s -> 12s) as the upsert's GIN-index maintenance on `fts` gets more expensive
+# with table size, until a batch finally exceeded whatever statement_timeout applies to this connection.
+# Lowered the starting size and, more importantly, upsert_batch() below now retries-with-backoff and then
+# adaptively halves a batch that keeps failing rather than crashing the whole run -- table growth means no
+# fixed batch size stays safe forever, so this has to self-adjust instead of just picking a smaller constant.
+BATCH_SIZE = 200
 DATASET_BASE = "https://storage.stapply.ai/jobhive/v1"
 # A bare httpx/urllib default User-Agent got a flat 403 from this CDN in live testing (2026-09-04);
 # curl's default worked fine -- mimicking a normal browser UA sidesteps whatever's filtering on it.
@@ -122,8 +130,9 @@ def load_and_filter(platform, path, cutoff):
     return rows
 
 
-def upsert_batch(client, rows):
-    resp = client.post(
+def _try_upsert(client, rows):
+    """One raw attempt. Returns the response; never raises for a non-2xx status (caller decides)."""
+    return client.post(
         f"{SUPABASE_URL}/rest/v1/automailsend_ats_job_pool",
         params={"on_conflict": "source_url"},
         headers={
@@ -135,8 +144,35 @@ def upsert_batch(client, rows):
         content=json.dumps(rows),
         timeout=60,
     )
-    if resp.status_code not in (200, 201, 204):
-        raise RuntimeError(f"Upsert failed ({resp.status_code}): {resp.text[:500]}")
+
+
+def upsert_batch(client, rows, max_retries=4):
+    # Retry transient failures (5xx, 429) with backoff first -- a statement timeout under momentary load can
+    # succeed on a plain retry. If it keeps failing, the batch itself is likely too large for the table's
+    # current size, so halve it and recurse rather than giving up (see BATCH_SIZE's own comment above for why
+    # a fixed size can't be trusted to stay safe as the table grows across a run).
+    resp = None
+    for attempt in range(max_retries):
+        resp = _try_upsert(client, rows)
+        if resp.status_code in (200, 201, 204):
+            return
+        retryable = resp.status_code in (429, 500, 502, 503, 504)
+        if not retryable or attempt == max_retries - 1:
+            break
+        wait = 2 ** attempt
+        log(f"  upsert of {len(rows)} row(s) failed ({resp.status_code}), retrying in {wait}s (attempt {attempt + 1}/{max_retries})...")
+        time.sleep(wait)
+
+    if len(rows) > 1:
+        mid = len(rows) // 2
+        log(f"  batch of {len(rows)} still failing after retries ({resp.status_code}: {resp.text[:200]}) -- splitting into {mid} + {len(rows) - mid}")
+        upsert_batch(client, rows[:mid], max_retries)
+        upsert_batch(client, rows[mid:], max_retries)
+        return
+
+    # A single row still fails after retries -- log and drop just this row rather than crashing the whole
+    # run over one pathological record (matches this codebase's "fail open" convention elsewhere).
+    log(f"  WARNING: dropping 1 row that failed after retries ({resp.status_code}): {resp.text[:300]} -- source_url={rows[0].get('source_url')}")
 
 
 def prune_old_rows(client, cutoff):
