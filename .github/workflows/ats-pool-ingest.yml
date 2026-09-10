@@ -5,11 +5,13 @@ name: Ingest ATS Job Pool
 # supabase_setup.sql for the full design. Runs here, not on the production droplet -- that box has 911MB
 # total RAM and was confirmed (2026-09-04) to OOM-kill on downloads far smaller than what this pulls; a GH
 # Actions runner has 7GB+, handling the combined ~344MB Parquet set in one shot with no streaming needed.
-# Daily cron matches the dataset's own observed ~daily upstream refresh (its Last-Modified header).
+# WEEKLY by design (2026-09-10). This was a daily cron, justified by the upstream dataset refreshing ~daily --
+# but that reasoning conflated how often to FETCH with how often to WRITE. The pool only ever needed a weekly
+# refresh; running it daily multiplied write volume sevenfold and helped crash the database.
 
 on:
   schedule:
-    - cron: "0 3 * * *" # 03:00 UTC daily
+    - cron: "0 3 * * 0" # 03:00 UTC every Sunday
   workflow_dispatch: # manual trigger, e.g. for the first real run / re-testing after a script change
 
 jobs:

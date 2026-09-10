@@ -25,9 +25,19 @@ found postings back to 2009 mixed with today's; without this filter the pool fil
 Rows missing a title or both description+apply_url are dropped as unusable.
 
 Upsert: direct Supabase REST calls (POST .../rest/v1/automailsend_ats_job_pool with
-Prefer: resolution=merge-duplicates, on_conflict=source_url) -- same raw-REST convention this project's own
-scratch tooling (sb_query.js) already uses, chosen over supabase-py to avoid a second Python dependency
-category. Batched (BATCH_SIZE rows per request) to stay well under PostgREST's payload limits.
+Prefer: resolution=ignore-duplicates, on_conflict=source_url). 2026-09-10: this was merge-duplicates, which
+rewrote every one of ~183k rows on EVERY run even when nothing about them had changed. Postgres writes a new
+row version (and WAL) per update regardless of whether values differ, so a daily full re-upsert generated
+enough WAL to crash the nano instance and put it into multi-day crash recovery. ignore-duplicates makes an
+existing source_url a no-op (ON CONFLICT DO NOTHING) -- new postings are written, unchanged ones cost nothing.
+Trade-off, deliberate: an edited posting is no longer refreshed in place. ATS postings are effectively
+immutable once published (they are taken down, not rewritten) and every row ages out within RETENTION_DAYS
+anyway, so this is the right trade against killing the database. Detecting genuine content changes would need
+a content-hash column and a migration -- a clean fast-follow if it ever proves necessary.
+Raw REST rather than supabase-py, matching this project's own scratch tooling (sb_query.js), to avoid a second
+Python dependency category. Batched (BATCH_SIZE rows per request) to stay well under PostgREST's payload
+limits, and the run ABORTS (exit 75) rather than retrying if the database itself is unreachable -- see
+preflight() and upsert_batch().
 
 Retention: after ingesting, deletes pool rows older than RETENTION_DAYS. Safe unconditionally -- this table
 is never referenced by a foreign key (see its own schema comment); once atsPool.worker.js finds a match it
@@ -46,7 +56,10 @@ import pyarrow.parquet as pq
 
 PLATFORMS = ["greenhouse", "lever", "ashby", "smartrecruiters"]
 RECENCY_DAYS = 30
-RETENTION_DAYS = 90
+# 2026-09-10: was 90. The design was always "keep nothing older than a month" -- 90 meant the pool held
+# roughly 3x the rows it was supposed to, on a nano instance. Matches RECENCY_DAYS on purpose: we ingest a
+# month's window and we keep exactly that window, nothing staler.
+RETENTION_DAYS = 30
 # 2026-09-04: a real full run against the live table (already holding the prior Lever ingest) hit Postgres
 # error 57014 "canceling statement due to statement timeout" on batch 46/368 at BATCH_SIZE=500 -- per-batch
 # latency was visibly climbing (7s -> 12s) as the upsert's GIN-index maintenance on `fts` gets more expensive
@@ -66,6 +79,27 @@ SUPABASE_KEY = os.environ.get("ATS_POOL_SUPABASE_SERVICE_ROLE_KEY") or os.enviro
 
 def log(msg):
     print(f"[ats_pool_ingest] {msg}", flush=True)
+
+
+class DatabaseUnavailable(RuntimeError):
+    """The target database is not answering. Abort the whole run instead of retry-storming it."""
+
+
+def preflight(client):
+    """Fail fast if the database is not accepting connections.
+
+    2026-09-10: without this, a database in crash recovery caused every scheduled run to spend its full
+    30-minute timeout retrying 183k rows against an instance that could not answer -- adding load to
+    something already struggling to come back. One cheap probe up front, then abort.
+    """
+    resp = client.get(
+        f"{SUPABASE_URL}/rest/v1/automailsend_ats_job_pool",
+        params={"select": "source_url", "limit": 1},
+        headers={"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"},
+        timeout=30,
+    )
+    if resp.status_code not in (200, 206):
+        raise DatabaseUnavailable(f"preflight failed ({resp.status_code}): {resp.text[:300]}")
 
 
 def download_parquet(platform, dest_path):
@@ -139,7 +173,7 @@ def _try_upsert(client, rows):
             "apikey": SUPABASE_KEY,
             "Authorization": f"Bearer {SUPABASE_KEY}",
             "Content-Type": "application/json",
-            "Prefer": "resolution=merge-duplicates,return=minimal",
+            "Prefer": "resolution=ignore-duplicates,return=minimal",
         },
         content=json.dumps(rows),
         timeout=60,
@@ -156,7 +190,12 @@ def upsert_batch(client, rows, max_retries=4):
         resp = _try_upsert(client, rows)
         if resp.status_code in (200, 201, 204):
             return
-        retryable = resp.status_code in (429, 500, 502, 503, 504)
+        # The database being DOWN is not a transient batch problem -- retrying and halving just piles load
+        # onto an instance that cannot answer (see preflight()). PGRST002 = PostgREST could not reach the
+        # database at all. Abort the whole run; the next scheduled one will pick up cleanly.
+        if resp.status_code == 503 or "PGRST002" in (resp.text or ""):
+            raise DatabaseUnavailable(f"database unavailable mid-run ({resp.status_code}): {resp.text[:200]}")
+        retryable = resp.status_code in (429, 500, 502, 504)
         if not retryable or attempt == max_retries - 1:
             break
         wait = 2 ** attempt
@@ -224,10 +263,20 @@ def main():
         return
 
     with httpx.Client() as client:
+        try:
+            preflight(client)
+        except (DatabaseUnavailable, httpx.HTTPError) as e:
+            log(f"ABORTING: database is not available -- {e}")
+            sys.exit(75)  # EX_TEMPFAIL: retriable condition, nothing wrong with this code
+
         batches = math.ceil(len(all_rows) / BATCH_SIZE)
         for i in range(batches):
             batch = all_rows[i * BATCH_SIZE:(i + 1) * BATCH_SIZE]
-            upsert_batch(client, batch)
+            try:
+                upsert_batch(client, batch)
+            except DatabaseUnavailable as e:
+                log(f"ABORTING at batch {i + 1}/{batches}: {e}")
+                sys.exit(75)
             log(f"  upserted batch {i + 1}/{batches} ({len(batch)} rows)")
 
         log(f"Pruning rows older than {RETENTION_DAYS} days...")
